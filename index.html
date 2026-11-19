@@ -1,0 +1,2421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BOM TO BR</title>
+  <!-- 高可用 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 稳定公共 CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.prod.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #64748b; border-radius: 4px; }
+    .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="app" class="min-h-screen flex flex-col relative">
+    
+    <!-- 顶部导航 (纯粹文字，无图标，无标语) -->
+    <header class="bg-indigo-700 text-white shadow-xs sticky top-0 z-30">
+      <div class="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between">
+        <h1 class="text-base font-black tracking-wider font-mono">BOM TO BR</h1>
+
+        <div class="flex items-center space-x-2">
+          <div class="flex items-center" v-if="bomItems.length > 0">
+            <label class="flex items-center text-xs text-indigo-100 cursor-pointer bg-indigo-800/80 px-2.5 py-1 rounded-md border border-indigo-600 hover:bg-indigo-800 transition">
+              <input type="checkbox" v-model="exportOnlyPositive" class="rounded text-emerald-500 mr-1.5 focus:ring-0">
+              <span>过滤零用量导出</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主体区域 -->
+    <main class="max-w-7xl mx-auto px-4 py-3 flex-1 w-full space-y-3">
+      
+      <!-- ========================================================================= -->
+      <!-- 模块 1：双态上传栏 (去副标题，纯净极简) -->
+      <!-- ========================================================================= -->
+      <div>
+        <!-- 未上传双卡片 (无副标题) -->
+        <div v-if="!bomItems.length || !buildPlans.length" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- BOM 上传框 -->
+          <div v-if="!bomItems.length" class="bg-white border rounded-xl p-5 shadow-xs border-indigo-100">
+            <h2 class="text-sm font-bold text-slate-800 flex items-center mb-3">
+              <span class="w-2.5 h-2.5 rounded-full bg-indigo-600 mr-2"></span>
+              1. ME 工程 BOM
+            </h2>
+            <label 
+              @dragover.prevent="bomDragOver = true"
+              @dragleave.prevent="bomDragOver = false"
+              @drop.prevent="handleBOMDrop"
+              :class="bomDragOver ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-300 bg-slate-50 hover:border-indigo-400'"
+              class="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer transition">
+              <svg class="w-8 h-8 text-indigo-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+              <span class="text-xs font-semibold text-slate-700">{{ bomFileName || '点击或拖拽上传 BOM (.xlsx)' }}</span>
+              <input type="file" class="hidden" accept=".xlsx,.xls" @change="handleBOMUpload">
+            </label>
+          </div>
+
+          <!-- 排产表上传框 -->
+          <div v-if="!buildPlans.length" class="bg-white border rounded-xl p-5 shadow-xs border-emerald-100">
+            <h2 class="text-sm font-bold text-slate-800 flex items-center mb-3">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-600 mr-2"></span>
+              2. 试产排产表 (Build Plan)
+            </h2>
+            <label 
+              @dragover.prevent="trackerDragOver = true"
+              @dragleave.prevent="trackerDragOver = false"
+              @drop.prevent="handleTrackerDrop"
+              :class="trackerDragOver ? 'border-emerald-600 bg-emerald-50/50' : 'border-slate-300 bg-slate-50 hover:border-emerald-400'"
+              class="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer transition">
+              <svg class="w-8 h-8 text-emerald-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+              <span class="text-xs font-semibold text-slate-700">{{ trackerFileName || '点击或拖拽上传排产表 (.xlsx)' }}</span>
+              <input type="file" class="hidden" accept=".xlsx,.xls" @change="handleTrackerUpload">
+            </label>
+          </div>
+        </div>
+
+        <!-- 文件上传成功后：收拢为极窄扁平状态条 -->
+        <div v-if="bomItems.length || buildPlans.length" class="bg-white border rounded-lg px-3.5 py-1.5 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div class="flex items-center space-x-3">
+            <!-- BOM 状态 -->
+            <div class="flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full" :class="bomItems.length ? 'bg-indigo-600' : 'bg-slate-300'"></span>
+              <span class="font-semibold text-slate-700">ME BOM:</span>
+              <span class="font-mono text-slate-600 truncate max-w-[200px]" :title="bomFileName">{{ bomFileName || '未导入' }}</span>
+              <span v-if="bomItems.length" class="bg-indigo-50 text-indigo-700 px-1.5 py-0.2 rounded text-[11px] font-bold">
+                {{ bomItems.length }} 项
+              </span>
+              <label class="text-indigo-600 hover:text-indigo-800 cursor-pointer underline ml-1 text-[11px]">
+                更换<input type="file" class="hidden" accept=".xlsx,.xls" @change="handleBOMUpload">
+              </label>
+            </div>
+
+            <span class="text-slate-300">|</span>
+
+            <!-- Tracker 状态 -->
+            <div class="flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full" :class="buildPlans.length ? 'bg-emerald-600' : 'bg-slate-300'"></span>
+              <span class="font-semibold text-slate-700">排产表:</span>
+              <span class="font-mono text-slate-600 truncate max-w-[200px]" :title="trackerFileName">{{ trackerFileName || '未导入' }}</span>
+              <span v-if="buildPlans.length" class="bg-emerald-50 text-emerald-700 px-1.5 py-0.2 rounded text-[11px] font-bold">
+                {{ buildPlans.length }} 批次 ({{ totalBuildQty }}台)
+              </span>
+              <label class="text-emerald-600 hover:text-emerald-800 cursor-pointer underline ml-1 text-[11px]">
+                更换<input type="file" class="hidden" accept=".xlsx,.xls" @change="handleTrackerUpload">
+              </label>
+            </div>
+          </div>
+
+          <!-- 右侧当前阶段快选 -->
+          <div class="flex items-center space-x-2" v-if="detectedPhases.length">
+            <span class="text-slate-500 font-medium text-xs">生效阶段:</span>
+            <select 
+              v-model="currentPhase" 
+              class="border border-indigo-200 bg-indigo-50/50 text-indigo-800 font-bold px-2 py-0.5 rounded text-xs outline-none focus:ring-1 focus:ring-indigo-500">
+              <option v-for="ph in detectedPhases" :key="ph" :value="ph">{{ ph }}</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- 2. 顶级三级 Tab 切换栏 -->
+      <!-- ========================================================================= -->
+      <div v-if="bomItems.length" class="bg-white border rounded-xl p-1 shadow-xs flex items-center justify-between">
+        <div class="flex items-center space-x-1">
+          <button 
+            @click="mainTab = 'overview'"
+            :class="mainTab === 'overview' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:bg-slate-100 font-semibold'"
+            class="px-5 py-2 rounded-lg text-[13px] transition flex items-center tracking-wide">
+            <span>物料清单</span>
+          </button>
+          
+          <button 
+            @click="mainTab = 'baseline'"
+            :class="mainTab === 'baseline' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:bg-slate-100 font-semibold'"
+            class="px-5 py-2 rounded-lg text-[13px] transition flex items-center tracking-wide">
+            <span>理论发料清单</span>
+          </button>
+
+          <button 
+            @click="mainTab = 'workbench'"
+            :class="mainTab === 'workbench' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:bg-slate-100 font-semibold'"
+            class="px-5 py-2 rounded-lg text-[13px] transition flex items-center tracking-wide">
+            <span>实际发料清单</span>
+          </button>
+        </div>
+
+        <div class="flex items-center space-x-1 bg-slate-100 p-0.5 rounded-lg" v-if="mainTab === 'overview'">
+          <button 
+            @click="viewMode = 'list'"
+            :class="viewMode === 'list' ? 'bg-white text-indigo-700 font-bold shadow-2xs' : 'text-slate-500 hover:text-slate-800'"
+            class="px-3 py-1 text-xs rounded-md transition">
+            单台清单
+          </button>
+          <button 
+            @click="viewMode = 'matrix'"
+            :class="viewMode === 'matrix' ? 'bg-white text-indigo-700 font-bold shadow-2xs' : 'text-slate-500 hover:text-slate-800'"
+            class="px-3 py-1 text-xs rounded-md transition">
+            排产透视矩阵
+          </button>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- 【PAGE 1】：物料清单 -->
+      <!-- ========================================================================= -->
+      <div v-if="bomItems.length && mainTab === 'overview'" class="space-y-3">
+        
+        <!-- 前道规格发料汇总小横条 -->
+        <div v-if="buildPlans.length" class="bg-white border rounded-xl p-3 shadow-xs space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-800 flex items-center">
+              <span class="w-2 h-2 rounded-full bg-indigo-600 mr-2"></span>
+              前道聚合规格 (L3 / L4 / L5)
+            </span>
+            <span class="text-[11px] font-mono text-slate-500">
+              BR: {{ frontStationsSummary.totalBRCount }} ｜ 配方: {{ frontStationsSummary.totalRecipeCount }} ｜ 排产总量: {{ frontStationsSummary.grandTotalQty }} 台
+            </span>
+          </div>
+          <div class="overflow-x-auto rounded border">
+            <table class="w-full text-left text-xs text-slate-600 border-collapse">
+              <thead class="bg-slate-100/90 text-slate-700 font-semibold border-b">
+                <tr>
+                  <th class="py-1.5 px-3">工段</th>
+                  <th class="py-1.5 px-3">CMF 槽位</th>
+                  <th class="py-1.5 px-3">BR 单号</th>
+                  <th class="py-1.5 px-3 text-center">配方数</th>
+                  <th class="py-1.5 px-3">FVC 规格与数量</th>
+                  <th class="py-1.5 px-3 text-right">总台数</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="(row, idx) in frontStationsSummary.rows" :key="row.station + row.brNum + idx" class="hover:bg-slate-50">
+                  <td class="py-1.5 px-3 font-bold font-mono">
+                    <span 
+                      class="px-1.5 py-0.2 rounded text-[10px]"
+                      :class="{
+                        'bg-blue-100 text-blue-800': row.station === 'L3',
+                        'bg-emerald-100 text-emerald-800': row.station === 'L4',
+                        'bg-purple-100 text-purple-800': row.station === 'L5'
+                      }">
+                      {{ row.station }}
+                    </span>
+                  </td>
+                  <td class="py-1.5 px-3 text-slate-700 font-bold">
+                    {{ getCmfDisplayName(row.cmfSlot) }}
+                  </td>
+                  <td class="py-1.5 px-3 font-mono font-bold text-slate-800">{{ row.brNum }}</td>
+                  <td class="py-1.5 px-3 text-center font-mono font-bold text-purple-700">{{ row.fvcCount }}</td>
+                  <td class="py-1.5 px-3 font-mono">
+                    <span v-for="(fvc, fIdx) in row.fvcList" :key="fIdx" class="inline-block mr-1 text-[10px] text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                      {{ fvc.fvcCode }}<span class="text-slate-400">({{ fvc.qty }})</span>
+                    </span>
+                  </td>
+                  <td class="py-1.5 px-3 text-right font-mono font-bold text-emerald-700">{{ row.totalQty }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 核心物料大表：纯粹按 L3 / L4 / L5 / L10 独立分流 -->
+        <div class="bg-white border rounded-xl shadow-xs overflow-hidden flex flex-col">
+          <div class="border-b px-4 py-2 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center space-x-1.5">
+              <button 
+                v-for="st in ['L3', 'L4', 'L5', 'L10']" 
+                :key="st"
+                @click="overviewStation = st"
+                :class="overviewStation === st ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:bg-slate-200 font-medium'"
+                class="px-3.5 py-1 rounded-lg text-xs transition flex items-center">
+                <span>{{ st }} 工段</span>
+                <span 
+                  class="ml-1.5 text-[10px] px-1.5 py-0.2 rounded-full font-mono"
+                  :class="overviewStation === st ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-200 text-slate-600'">
+                  {{ getStationItemCount(st) }}
+                </span>
+              </button>
+            </div>
+
+            <div class="relative">
+              <input 
+                type="text" 
+                v-model="searchQuery" 
+                placeholder="搜索当前工段 PN / 描述 / 厂商..." 
+                class="border rounded-lg pl-7 pr-2.5 py-1 text-xs w-60 bg-white focus:ring-2 focus:ring-indigo-500">
+              <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </div>
+          </div>
+
+          <!-- 视图 1：单台 BOM 清单 -->
+          <div v-if="viewMode === 'list'" class="overflow-x-auto custom-scroll max-h-[600px]">
+            <table class="w-full text-left text-xs text-slate-600">
+              <thead class="bg-slate-100 text-slate-700 font-semibold sticky top-0 z-10 shadow-2xs border-b">
+                <tr>
+                  <th class="py-2.5 px-3">类别</th>
+                  <th class="py-2.5 px-3">Part Number</th>
+                  <th class="py-2.5 px-3">中文描述 (SLOT)</th>
+                  <th class="py-2.5 px-3">Revision ({{ currentPhase }})</th>
+                  <th class="py-2.5 px-3">Vendor (供方)</th>
+                  <th class="py-2.5 px-3">CMF 槽位</th>
+                  <th class="py-2.5 px-3 text-center">机型特性</th>
+                  <th class="py-2.5 px-3 text-center">供应级别</th>
+                  <th class="py-2.5 px-3 text-right font-mono">单台用量</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 font-sans">
+                <tr 
+                  v-for="item in filteredOverviewResults" 
+                  :key="item.pn + item.level + item.cmfSlot + item.tier + item.supplier"
+                  class="hover:bg-slate-50 transition"
+                  :class="item.isSubAssembly ? 'bg-purple-50/20' : ''">
+                  <td class="py-2 px-3">
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                      {{ item.category || (item.isSubAssembly ? '组件' : '常规') }}
+                    </span>
+                  </td>
+                  <td class="py-2 px-3 font-mono font-semibold text-indigo-600">{{ item.pn }}</td>
+                  <td class="py-2 px-3 font-medium text-slate-800">
+                    {{ item.descZh }}
+                    <span v-if="item.isSubAssembly" class="ml-1 px-1.5 py-0.2 bg-purple-100 text-purple-800 text-[10px] font-bold rounded">自制件</span>
+                  </td>
+                  <td class="py-2 px-3 font-mono text-[11px]">
+                    <span v-if="item.isSubAssembly" class="px-1.5 py-0.5 bg-purple-100 text-purple-800 font-bold rounded border border-purple-200">
+                      {{ item.rev || 'FVC' }}
+                    </span>
+                    <span v-else :class="item.rev && item.rev !== 'TBD' ? 'text-emerald-700 font-bold' : 'text-slate-400'">
+                      {{ item.rev || 'TBD' }}
+                    </span>
+                  </td>
+                  <td class="py-2 px-3 font-medium text-slate-700">{{ item.supplier || '-' }}</td>
+                  <td class="py-2 px-3 font-bold font-mono text-purple-700">
+                    {{ getCmfDisplayName(item.cmfSlot) }}
+                  </td>
+                  <td class="py-2 px-3 text-center">
+                    <span class="text-[10px] font-bold text-slate-600">{{ item.featureTag }}</span>
+                  </td>
+                  <td class="py-2 px-3 text-center">
+                    <span 
+                      class="text-[10px] font-bold px-1.5 py-0.2 rounded"
+                      :class="item.isSingleSource ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-600'">
+                      {{ item.tier }}
+                    </span>
+                  </td>
+                  <td class="py-2 px-3 text-right font-mono font-bold text-slate-800">{{ item.unitQty }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 视图 2：排产透视矩阵 -->
+          <div v-if="viewMode === 'matrix'" class="overflow-x-auto custom-scroll max-h-[600px]">
+            <table class="w-full text-left text-xs text-slate-600 border-collapse">
+              <thead class="bg-slate-100 text-slate-700 font-semibold sticky top-0 z-10 shadow-2xs border-b">
+                <tr>
+                  <th class="py-2.5 px-3 border-r">Part Number</th>
+                  <th class="py-2.5 px-3 border-r">中文描述 (SLOT)</th>
+                  <th class="py-2.5 px-3 border-r">CMF 槽位</th>
+                  <th class="py-2.5 px-3 border-r">Vendor</th>
+                  <th 
+                    v-for="plan in buildPlans" 
+                    :key="plan.id" 
+                    class="py-2 px-2 text-center border-r bg-indigo-50/30 min-w-[85px]">
+                    <div class="font-bold text-indigo-900">{{ plan.fvc }}</div>
+                    <div class="text-[10px] text-slate-500 font-normal truncate">{{ plan.region }}-{{ getCmfDisplayName(plan.cmfSlot) }}</div>
+                    <div class="text-[10px] text-purple-700 font-semibold">[{{ plan.rfHole }}]</div>
+                    <div class="text-[10px] text-indigo-600 font-bold">Qty: {{ plan.qty }}</div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr 
+                  v-for="item in filteredOverviewResults" 
+                  :key="item.pn + item.level"
+                  class="hover:bg-slate-50">
+                  <td class="py-2 px-3 border-r font-mono font-semibold text-indigo-600">{{ item.pn }}</td>
+                  <td class="py-2 px-3 border-r text-slate-800">{{ item.descZh }}</td>
+                  <td class="py-2 px-3 border-r font-mono font-bold text-purple-700">{{ getCmfDisplayName(item.cmfSlot) }}</td>
+                  <td class="py-2 px-3 border-r text-slate-600">{{ item.supplier || '-' }}</td>
+                  <td 
+                    v-for="plan in buildPlans" 
+                    :key="plan.id"
+                    class="py-2 px-2 text-center border-r font-mono"
+                    :class="item.allocations[plan.id] ? 'bg-emerald-50/40 text-emerald-800 font-bold' : 'text-slate-300'">
+                    <span v-if="item.allocations[plan.id]">
+                      {{ item.allocations[plan.id].brQty }}
+                      <span class="text-[9px] block text-emerald-600 font-normal">({{ item.allocations[plan.id].rev || 'TBD' }})</span>
+                    </span>
+                    <span v-else>-</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- 【PAGE 2】：理论发料清单 (全工段覆盖 + 动态颜色卡片，去底部辅助说明) -->
+      <!-- ========================================================================= -->
+      <div v-if="bomItems.length && mainTab === 'baseline'" class="space-y-4">
+        
+        <div class="bg-white border rounded-xl p-4 shadow-xs space-y-4">
+          <div class="flex flex-wrap items-center justify-between border-b pb-3 gap-3">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+              <h2 class="text-sm font-bold text-slate-800">全工段理论发料标准基线 (BOM 静态推导)</h2>
+              <span class="text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.2 rounded border border-indigo-200">
+                点击卡片固定展示该工况完整清单
+              </span>
+            </div>
+
+            <!-- 工段二级切换分段控制器 -->
+            <div class="flex items-center space-x-1 bg-slate-100 p-0.5 rounded-lg">
+              <button 
+                v-for="st in ['L3', 'L4', 'L5', 'L10']" 
+                :key="st"
+                @click="baselineStation = st"
+                :class="baselineStation === st ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900 font-medium'"
+                class="px-3.5 py-1 text-xs rounded-md transition flex items-center">
+                <span>{{ st }} 工段</span>
+                <span class="ml-1 text-[10px] opacity-80">({{ getStationBaselines(st).length }})</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 当前工段标准卡片网格 -->
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            <div 
+              v-for="base in getStationBaselines(baselineStation)" 
+              :key="base.key"
+              @click="openFixedSlotPanel(`${baselineStation} 工段 [${base.title}] 理论发料清单`, base.rawItems)"
+              class="p-3.5 rounded-xl border bg-slate-50/70 hover:bg-white hover:border-indigo-400 cursor-pointer transition shadow-2xs space-y-2 group">
+              
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-slate-800 group-hover:text-indigo-600">{{ base.title }}</span>
+                <span 
+                  class="text-[10px] px-1.5 py-0.2 rounded font-bold"
+                  :class="base.tagClass">
+                  {{ base.tag }}
+                </span>
+              </div>
+
+              <div class="flex items-baseline justify-between pt-1 border-t border-slate-200/60">
+                <span class="text-[11px] text-slate-400">标准物理定额</span>
+                <span class="text-base font-black font-mono text-indigo-600 group-hover:underline">
+                  {{ base.slotCount }} <span class="text-xs font-normal">SLOT</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- 【PAGE 3】：实际发料清单 (专职发料与差异核验，带小板版本在线维护) -->
+      <!-- ========================================================================= -->
+      <div v-if="bomItems.length && mainTab === 'workbench'" class="space-y-4">
+        <div v-if="!buildPlans.length" class="text-center py-12 border-2 border-dashed rounded-xl bg-white space-y-2">
+          <div class="text-3xl">📋</div>
+          <h3 class="text-sm font-semibold text-slate-700">请在上方上传 Build Tracker 排产表</h3>
+          <p class="text-xs text-slate-400">系统将根据排产批次与当前选定阶段 [{{ currentPhase }}] 自动输出标准 Recipe 配方</p>
+        </div>
+
+        <div v-else class="space-y-4">
+          <!-- 二级工段切换 Tab 与 批量导出栏（常驻当前工段健康度状态与小板维护按钮） -->
+          <div class="bg-white border rounded-xl p-2.5 shadow-xs flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center space-x-2">
+              <div class="flex items-center space-x-1">
+                <button 
+                  v-for="st in ['L3', 'L4', 'L5', 'L10']" 
+                  :key="st"
+                  @click="activeWorkbenchStation = st"
+                  :class="activeWorkbenchStation === st ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-600 hover:bg-slate-100 font-medium'"
+                  class="px-4 py-1.5 rounded-lg text-xs transition flex items-center">
+                  <span>{{ st }} 工段</span>
+                  <span 
+                    class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono"
+                    :class="activeWorkbenchStation === st ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-200 text-slate-700'">
+                    {{ getStationBRGroups(st).length }} BR
+                  </span>
+                </button>
+              </div>
+
+              <!-- 齐套健康度状态专职在此展示 -->
+              <div class="hidden sm:block ml-2">
+                <span v-if="stationDiffCount === 0" class="inline-flex items-center text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
+                  ✓ {{ activeWorkbenchStation }} 100% 齐套
+                </span>
+                <span v-else class="inline-flex items-center text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
+                  ⚠️ {{ activeWorkbenchStation }} 存 {{ stationDiffCount }} 处差异
+                </span>
+              </div>
+            </div>
+
+            <!-- 操作按钮组：支持 L10 在线维护小板版本 + 批量导出 -->
+            <div class="flex items-center space-x-2">
+              <button 
+                v-if="activeWorkbenchStation === 'L10' && subPcbItemsL10.length > 0"
+                @click="openSubPcbModal"
+                class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center transition shadow-2xs">
+                <span>⚡ 维护小板版本</span>
+                <span v-if="hasConfiguredSubPcb" class="ml-1 w-2 h-2 rounded-full bg-emerald-500"></span>
+              </button>
+
+              <button 
+                @click="exportCurrentStationAllBRs"
+                class="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center shadow-xs transition">
+                <svg class="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                <span>批量导出当前工段 ({{ currentPhase }})</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 按 BR 分组的数据清单 -->
+          <div 
+            v-for="brGroup in currentWorkbenchBRGroups" 
+            :key="brGroup.brNum"
+            class="bg-white border rounded-xl overflow-hidden shadow-xs transition">
+            
+            <div class="bg-slate-100/80 border-b px-4 py-2 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center space-x-2.5">
+                <span class="font-mono font-bold text-xs text-slate-800 flex items-center">
+                  <span class="w-2 h-2 rounded-full bg-indigo-600 mr-2"></span>
+                  BR: {{ brGroup.brNum }}
+                </span>
+
+                <span v-if="brGroup.cmfSlot" class="text-[11px] font-mono font-bold text-slate-700 bg-slate-200/80 px-2 py-0.5 rounded">
+                  {{ getCmfDisplayName(brGroup.cmfSlot) }}
+                </span>
+
+                <button 
+                  v-if="brGroup.station !== 'L10'"
+                  @click="openEditDialog('BR', brGroup.station, brGroup.brNumKey, brGroup.isVirtualBR ? '' : brGroup.brNum, `维护 ${brGroup.station} [${brGroup.cmfSlot ? getCmfDisplayName(brGroup.cmfSlot) : '通用'}] 的官方 BR 单号`)"
+                  class="text-indigo-600 hover:text-indigo-800 text-[11px] font-bold hover:underline">
+                  ✏️ 编辑单号
+                </button>
+
+                <span v-if="brGroup.station === 'L10'" class="text-[10px] text-slate-500 bg-slate-200 px-1.5 py-0.2 rounded font-medium">
+                  排产指定
+                </span>
+              </div>
+
+              <div class="flex items-center space-x-3 text-xs">
+                <span class="font-mono text-slate-600">
+                  <strong class="text-slate-800">{{ brGroup.totalQty }}</strong> 台 ｜ 
+                  <span>{{ brGroup.recipes.length }} 组配方</span> ｜
+                  <span class="text-slate-700 font-semibold">{{ getBRUniquePNCount(brGroup) }} 种物料 (PN)</span>
+                </span>
+                <button 
+                  @click="exportStationSingleBR(brGroup.station, brGroup)"
+                  class="bg-white hover:bg-emerald-600 hover:text-white text-slate-700 border px-2.5 py-1 rounded text-xs font-semibold flex items-center transition shadow-2xs">
+                  ⬇ 导出 BR
+                </button>
+              </div>
+            </div>
+
+            <!-- Recipe 数据表格 -->
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs text-slate-600 border-collapse">
+                <thead class="bg-slate-50 text-slate-700 font-semibold border-b">
+                  <tr>
+                    <th class="py-2.5 px-3">配方 / FVC 代号</th>
+                    <th class="py-2.5 px-3">区域 / 工况特性</th>
+                    <th class="py-2.5 px-3">投入组件 / 关键属性</th>
+                    <th class="py-2.5 px-3">绑定工单批次</th>
+                    <th class="py-2.5 px-3 text-center min-w-[200px]">物理槽位定额核验 ──【SLOT维度】</th>
+                    <th class="py-2.5 px-3 text-right font-mono">台数</th>
+                    <th class="py-2.5 px-3 text-center">操作</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-sans">
+                  <tr v-for="(rec, rIdx) in brGroup.recipes" :key="rec.id" class="hover:bg-slate-50/80 transition" :class="rec.diffInfo && !rec.diffInfo.isPass ? 'bg-amber-50/30' : ''">
+                    <!-- 1. 配方与 FVC -->
+                    <td class="py-2.5 px-3 font-medium">
+                      <div class="flex items-center space-x-2">
+                        <span class="font-bold text-slate-800">Recipe {{ rIdx + 1 }}</span>
+                        <span class="font-mono text-slate-700 font-bold">
+                          {{ rec.fvcCode }}
+                        </span>
+                        <button 
+                          v-if="brGroup.station !== 'L10'"
+                          @click="openEditDialog('FVC', brGroup.station, rec.fvcKey, rec.isVirtualFVC ? '' : rec.fvcCode, `维护 ${brGroup.station} 配方 ${rIdx + 1} 的官方 FVC 代码`)"
+                          title="维护此配方 FVC 代码"
+                          class="text-slate-400 hover:text-indigo-600 text-[10px]">
+                          ✏️
+                        </button>
+                      </div>
+                    </td>
+
+                    <!-- 2. 区域与特性标签 -->
+                    <td class="py-2.5 px-3">
+                      <div class="flex items-center space-x-1.5 text-[11px]" v-if="rec.plans && rec.plans.length">
+                        <span class="font-semibold text-slate-800">{{ rec.plans[0].region }}</span>
+                        <span class="text-slate-300">·</span>
+                        <span :class="(rec.plans[0].rfHole || '').toUpperCase().includes('RF') || (rec.plans[0].rfHole || '').toUpperCase().includes('BE') ? 'text-amber-700 font-semibold' : 'text-slate-500'">
+                          {{ rec.plans[0].rfHole || 'Normal' }}
+                        </span>
+                      </div>
+                      <span v-else class="text-slate-400">-</span>
+                    </td>
+
+                    <!-- 3. 关键标签/组件 -->
+                    <td class="py-2.5 px-3 font-mono">
+                      <div class="flex flex-wrap gap-1 items-center">
+                        <span 
+                          v-for="(tag, tIdx) in getRecipeKeyTags(brGroup.station, rec)" 
+                          :key="tIdx"
+                          class="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                          {{ tag.text }}
+                        </span>
+                      </div>
+                    </td>
+
+                    <!-- 4. 绑定工单批次 -->
+                    <td class="py-2.5 px-3 text-slate-500 max-w-[180px] truncate" :title="rec.plans.map(p => p.fvc).join(', ')">
+                      {{ rec.plans.map(p => p.fvc).join(', ') }}
+                    </td>
+
+                    <!-- 5. 物理槽位定额差异：纯按 SLOT 判定 -->
+                    <td class="py-2.5 px-3 text-center">
+                      <div v-if="!rec.diffInfo || rec.diffInfo.isPass">
+                        <span class="inline-flex items-center text-emerald-700 font-semibold text-[11px]">
+                          ✓ 齐套 ({{ rec.diffInfo ? rec.diffInfo.expectedCount : rec.items.length }} 槽位)
+                        </span>
+                      </div>
+
+                      <div v-else class="space-y-1">
+                        <span class="inline-block px-2 py-0.5 rounded font-bold text-[11px] bg-amber-100 text-amber-900 border border-amber-300">
+                          ⚠️ 已满足 {{ rec.diffInfo.actualCount }} / 应有 {{ rec.diffInfo.expectedCount }} SLOT
+                        </span>
+
+                        <div v-if="rec.diffInfo.missing.length" class="text-[10px] text-rose-800 font-sans text-left bg-rose-50 p-1.5 rounded border border-rose-200 space-y-0.5">
+                          <div class="font-bold flex items-center text-rose-900">
+                            <span>🔻 缺 {{ rec.diffInfo.missing.length }} 项物理槽位：</span>
+                          </div>
+                          <div v-for="m in rec.diffInfo.missing" :key="m.slotKey" class="truncate" :title="m.slotName">
+                            • <span class="font-bold">{{ m.slotName }}</span>
+                          </div>
+                        </div>
+
+                        <div v-if="rec.diffInfo.redundant.length" class="text-[10px] text-amber-800 font-sans text-left bg-amber-50 p-1.5 rounded border border-amber-200 space-y-0.5">
+                          <div class="font-bold flex items-center text-amber-900">
+                            <span>🔺 多 {{ rec.diffInfo.redundant.length }} 项：</span>
+                          </div>
+                          <div v-for="r in rec.diffInfo.redundant" :key="r.slotKey" class="truncate" :title="r.slotName">
+                            • <span class="font-bold">{{ r.slotName }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <!-- 6. 台数 -->
+                    <td class="py-2.5 px-3 text-right font-mono font-bold text-slate-800 text-sm">
+                      {{ rec.totalQty }}
+                    </td>
+
+                    <!-- 7. 操作 -->
+                    <td class="py-2.5 px-3 text-center">
+                      <button 
+                        @click="openRecipeDrawer(brGroup.station, brGroup.brNum, rIdx + 1, rec)"
+                        class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 rounded text-xs font-semibold transition border border-slate-200">
+                        校验物料
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 空白引导占位 (纯净极简，无多余副标题) -->
+      <div v-if="!bomItems.length" class="text-center py-16 border-2 border-dashed rounded-xl bg-white">
+        <div class="text-4xl mb-3">📂</div>
+        <h3 class="text-base font-semibold text-slate-700">请上传 ME BOM 工程文件 (.xlsx)</h3>
+      </div>
+    </main>
+
+    <!-- ========================================================================= -->
+    <!-- 🌟 专职弹窗：L10 小板硬件版本按 SKU 独立维护窗口 (免去重复修改上传 BOM) -->
+    <!-- ========================================================================= -->
+    <div 
+      v-if="subPcbModalVisible"
+      class="fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+      @click.self="subPcbModalVisible = false">
+      
+      <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg p-5 space-y-4 animate-in fade-in duration-200">
+        <div class="flex items-center justify-between border-b pb-2.5">
+          <div class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+            <h3 class="text-sm font-bold text-slate-800">维护 L10 小板硬件版本 (按 SKU 独立配置)</h3>
+          </div>
+          <button @click="subPcbModalVisible = false" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+
+        <p class="text-[11px] text-slate-500">
+          直接输入 NPI 系统确认的硬件版本，确认后全局联动生效，无需修改或重新上传 BOM。
+        </p>
+
+        <!-- 动态列出 BOM 中检出的小板物料 -->
+        <div class="space-y-3 max-h-60 overflow-y-auto custom-scroll pr-1">
+          <div 
+            v-for="item in subPcbItemsL10" 
+            :key="item.pn"
+            class="p-2.5 rounded-xl border bg-slate-50 flex items-center justify-between gap-3">
+            <div class="truncate flex-1">
+              <div class="flex items-center space-x-1.5">
+                <span class="font-mono font-bold text-xs text-indigo-700">{{ item.pn }}</span>
+                <span v-if="item.sku" class="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800">
+                  {{ item.sku }}
+                </span>
+              </div>
+              <div class="text-[11px] text-slate-500 truncate mt-0.5">{{ item.descZh || item.descEn }}</div>
+            </div>
+
+            <!-- 版本输入框 -->
+            <div class="flex items-center space-x-1.5 shrink-0">
+              <span class="text-[11px] text-slate-400 font-medium">版本:</span>
+              <input 
+                type="text" 
+                v-model="tempSubPcbRevs[item.pn]"
+                placeholder="如 01 或 TBD"
+                class="w-24 border-2 border-indigo-200 focus:border-indigo-600 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none text-center bg-white">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end space-x-2 pt-2 border-t text-xs">
+          <button @click="subPcbModalVisible = false" class="px-3.5 py-1.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition">
+            取消
+          </button>
+          <button @click="saveSubPcbRevs" class="px-4 py-1.5 rounded-lg font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-2xs transition">
+            确认并联动生效
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 点击后弹出的固定大框：全工段 SLOT 理论发料清单 -->
+    <div 
+      v-if="fixedSlotPanel.visible" 
+      class="fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+      @click.self="fixedSlotPanel.visible = false">
+      
+      <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in duration-200">
+        
+        <div class="px-5 py-3.5 bg-indigo-700 text-white flex items-center justify-between shrink-0">
+          <div class="flex items-center space-x-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            <h3 class="text-sm font-bold tracking-wide">{{ fixedSlotPanel.title }}</h3>
+            <span class="text-[11px] font-mono font-bold bg-indigo-900/80 text-emerald-300 px-2 py-0.5 rounded border border-indigo-500">
+              共 {{ filteredFixedSlotItems.length }} 项理论物料
+            </span>
+          </div>
+          <button @click="fixedSlotPanel.visible = false" class="text-white hover:text-indigo-200 text-base font-bold px-2 py-1">✕</button>
+        </div>
+
+        <div class="px-5 py-2.5 bg-slate-50 border-b flex items-center justify-between gap-3 shrink-0">
+          <div class="relative flex-1">
+            <input 
+              type="text" 
+              v-model="fixedSlotSearch"
+              placeholder="快速检索料号 / 中文描述 / 类别 / 厂商..." 
+              class="w-full border rounded-lg pl-8 pr-3 py-1.5 text-xs bg-white focus:ring-2 focus:ring-indigo-500 font-mono">
+            <svg class="w-4 h-4 text-slate-400 absolute left-2.5 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <span class="text-xs text-slate-400 hidden sm:inline">固定审查面板，支持平稳滚轮查看与划选复制</span>
+        </div>
+
+        <div class="flex-1 overflow-y-auto custom-scroll p-4">
+          <table class="w-full text-left text-xs text-slate-600 border-collapse">
+            <thead class="bg-slate-100 text-slate-700 font-semibold sticky top-0 z-10 border-b">
+              <tr>
+                <th class="py-2 px-3 w-12 text-center">序号</th>
+                <th class="py-2 px-3">类别</th>
+                <th class="py-2 px-3">Part Number</th>
+                <th class="py-2 px-3">中文描述 (SLOT)</th>
+                <th class="py-2 px-3">供方 (Vendor)</th>
+                <th class="py-2 px-3 text-right">单台用量</th>
+                <th class="py-2 px-3">特性/工况</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 font-sans">
+              <tr v-for="(it, idx) in filteredFixedSlotItems" :key="idx" class="hover:bg-slate-50 transition">
+                <td class="py-2 px-3 text-center font-mono text-slate-400">{{ idx + 1 }}</td>
+                <td class="py-2 px-3">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                    {{ it.category || '结构件' }}
+                  </span>
+                </td>
+                <td class="py-2 px-3 font-mono font-semibold text-indigo-600">{{ it.pn }}</td>
+                <td class="py-2 px-3 font-medium text-slate-800">{{ it.descZh || it.desc || '-' }}</td>
+                <td class="py-2 px-3 font-medium text-slate-600">{{ it.supplier || it.vendor || '-' }}</td>
+                <td class="py-2 px-3 text-right font-mono font-bold text-slate-700">{{ it.qty || 1 }}</td>
+                <td class="py-2 px-3">
+                  <span class="text-[10px] font-bold px-1.5 py-0.2 rounded" :class="it.rfHole ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'text-slate-400'">
+                    {{ it.rfHole || '常规' }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="px-5 py-2.5 bg-slate-50 border-t flex items-center justify-between text-xs text-slate-400 shrink-0">
+          <span>共 {{ filteredFixedSlotItems.length }} 项零件</span>
+          <button @click="fixedSlotPanel.visible = false" class="px-4 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-semibold transition">
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧滑出抽屉：配方物料核查台账 -->
+    <div 
+      v-if="drawerVisible" 
+      class="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-xs transition-opacity flex justify-end"
+      @click.self="drawerVisible = false">
+      <div class="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col">
+        <div class="p-4 bg-indigo-700 text-white flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold">{{ activeRecipeData.title }}</h3>
+            <p class="text-xs text-indigo-100 mt-1">当前输出阶段: {{ currentPhase }}</p>
+          </div>
+          <button @click="drawerVisible = false" class="text-white hover:opacity-75">✕</button>
+        </div>
+
+        <div class="p-4 overflow-y-auto flex-1 custom-scroll">
+          <table class="w-full text-left text-xs text-slate-600 border-collapse">
+            <thead class="bg-slate-100 text-slate-700 font-semibold sticky top-0 z-10 border-b">
+              <tr>
+                <th class="py-2 px-2.5">Part Number</th>
+                <th class="py-2 px-2.5">Part Description</th>
+                <th class="py-2 px-2.5">Revision ({{ currentPhase }})</th>
+                <th class="py-2 px-2.5 text-right">Quantity</th>
+                <th class="py-2 px-2.5">Vendor</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr v-for="item in activeRecipeData.items" :key="item.pn">
+                <td class="py-2 px-2.5 font-mono font-bold text-indigo-600">{{ item.pn }}</td>
+                <td class="py-2 px-2.5 font-medium text-slate-800">{{ item.desc }}</td>
+                <td class="py-2 px-2.5 font-mono text-[11px]" :class="item.rev !== 'TBD' ? 'text-emerald-700 font-semibold' : 'text-slate-400'">
+                  {{ item.rev }}
+                </td>
+                <td class="py-2 px-2.5 text-right font-mono font-bold">{{ item.qty }}</td>
+                <td class="py-2 px-2.5 font-medium text-slate-700">{{ item.vendor }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 维护 BR 单号与 FVC 代号的填报弹窗 -->
+    <div 
+      v-if="editDialogVisible"
+      class="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+      @click.self="editDialogVisible = false">
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 space-y-4 transform transition-all">
+        <div class="flex items-center justify-between border-b pb-2.5">
+          <h3 class="text-base font-bold text-slate-800 flex items-center">
+            <span class="w-2.5 h-2.5 rounded-full mr-2" :class="editDialogTarget.type === 'BR' ? 'bg-indigo-600' : 'bg-purple-600'"></span>
+            {{ editDialogTarget.type === 'BR' ? '维护 BR 单号' : '维护 FVC 代号' }}
+          </h3>
+          <button @click="editDialogVisible = false" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+
+        <div class="space-y-2">
+          <p class="text-xs text-slate-500 font-medium">{{ editDialogTarget.prompt }}</p>
+          <div class="relative">
+            <input 
+              type="text" 
+              v-model="editDialogValue" 
+              ref="dialogInputRef"
+              @keyup.enter="saveEditDialog"
+              placeholder="请输入正式审批的单号 (如 158511, F01)..."
+              class="w-full border-2 border-indigo-200 focus:border-indigo-600 rounded-lg px-3 py-2 text-sm font-mono font-bold text-slate-800 outline-none transition shadow-2xs">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end space-x-2 pt-2 border-t">
+          <button @click="editDialogVisible = false" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">
+            取消
+          </button>
+          <button @click="saveEditDialog" class="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-2xs transition">
+            确认并联动生效
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部版权 -->
+    <footer class="bg-white border-t py-2.5 text-center text-xs text-slate-400">
+      NPI 结构物料发料系统 ｜ ME BOM to BR Recipe Engine
+    </footer>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 【永久规则中心】 RULE_ENGINE (冻结核心业务公理)
+    // =========================================================================
+    const RULE_ENGINE = Object.freeze({
+      // 全动态提取 CMF 槽位（支持 1~N 任意数字，去硬编码限制）
+      extractCmfSlot(val, cmfNameMap = {}) {
+        if (!val) return 0;
+        const s = String(val).trim().toUpperCase();
+        if (['ALL', '通用', '/', '0', 'NA', 'NAN', 'NONE'].includes(s)) return 0;
+        
+        let m = s.match(/CMF[_\s-]?(\d+)/);
+        if (m) return parseInt(m[1], 10);
+
+        m = s.match(/(\d+)(?:ST|ND|RD|TH)/);
+        if (m) return parseInt(m[1], 10);
+
+        m = s.match(/(\d+)\s*CMF/);
+        if (m) return parseInt(m[1], 10);
+
+        m = s.match(/第\s*(\d+)/);
+        if (m) return parseInt(m[1], 10);
+
+        const cnNums = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6 };
+        for (const [cn, num] of Object.entries(cnNums)) {
+          if (s.includes(`第${cn}`)) return num;
+        }
+
+        if (cmfNameMap && Object.keys(cmfNameMap).length) {
+          for (const [slotStr, name] of Object.entries(cmfNameMap)) {
+            if (name && s.includes(name.toUpperCase())) {
+              return parseInt(slotStr, 10);
+            }
+          }
+        }
+
+        return 0;
+      },
+
+      cleanVendor(str) {
+        if (!str) return '';
+        const s = String(str).trim();
+        const upper = s.toUpperCase();
+        if (['/', '0', 'NA', 'NAN', 'N/A', 'NONE'].includes(upper)) return '';
+        if (/^V\d+(\.[0-9A-Z]+)?$/i.test(upper) || /^REV\b/i.test(upper)) return '';
+        return s;
+      },
+
+      isValidKitNumber(val) {
+        if (!val) return false;
+        const s = String(val).trim().toUpperCase();
+        return !['#N/A', 'N/A', 'NA', '/', '0', 'NAN', 'UNDEFINED', 'NULL', 'TBD'].includes(s);
+      },
+
+      isAccessoryKeyword(descZh, descEn) {
+        const text = `${descZh || ''} ${descEn || ''}`.toUpperCase();
+        const accessoryKeywords = [
+          'PSA', 'ADH', 'TAPE', 'GLUE', '背胶', '双面胶', '胶',
+          'FOAM', 'PORON', 'CUSHION', '泡棉', '海绵', 'GASKET', '无纺布', 'FABRIC',
+          'GRAPHITE', '石墨', 'COPPER', '铜皮', '铜块', 'CU_BLOCK', '导热',
+          'PET', 'MYLAR', 'PTFE', '铁氟龙', 'TEFLON', '保护膜',
+          'MESH', 'RUBBER', '硅胶', 'TPU', 'SEAL', '网纱', '防尘网', '隔磁片',
+          'SCREW', '螺丝', 'LABEL', '标签'
+        ];
+        return accessoryKeywords.some(kw => text.includes(kw));
+      },
+
+      matchSupplierDynamic(bomSuppliersStr, trackerSupplierVal) {
+        if (!trackerSupplierVal) return true;
+        const target = trackerSupplierVal.trim().toUpperCase();
+        if (!target || ['/', '0', 'NA', 'NAN', 'TBD', '-', 'UNDEFINED'].includes(target)) return true;
+        const bomSup = (bomSuppliersStr || '').trim().toUpperCase();
+        if (!bomSup) return false;
+
+        const aliasMap = {
+          'TM': 'TIANMA', 'TIANMA': 'TM', '天马': 'TM',
+          'CSOT': '华星', '华星': 'CSOT',
+          'KW': 'KINWONG', 'KINWONG': 'KW', '景旺': 'KW',
+          'AMP': 'AMPHENOL', 'AMPHENOL': 'AMP', '安费诺': 'AMP',
+          'HL': 'HUANLI', 'HUANLI': 'HL', '环力': 'HL',
+          'SWD': 'SUNWODA', 'SUNWODA': 'SWD', '欣旺达': 'SWD',
+          'BYD': '比亚迪', '比亚迪': 'BYD',
+          'XINXIU': '新秀', '新秀': 'XINXIU',
+          'CAICHEN': '彩辰', '彩辰': 'CAICHEN',
+          'YAHUA': '雅华', '雅华': 'YAHUA',
+          'BIEL': '伯恩', '伯恩': 'BIEL',
+          'SPEED': '硕贝德', '硕贝德': 'SPEED',
+          'DEMEN': '得门', '得门': 'DEMEN'
+        };
+
+        if (aliasMap[target] && (bomSup.includes(aliasMap[target]) || bomSup.includes(target))) return true;
+        if (bomSup.includes(target) || target.includes(bomSup)) return true;
+
+        const targetTokens = target.split(/[^A-Z0-9\u4e00-\u9fa5]+/).filter(t => t.length >= 2);
+        const bomTokens = bomSup.split(/[^A-Z0-9\u4e00-\u9fa5]+/).filter(t => t.length >= 2);
+        for (const tTok of targetTokens) {
+          for (const bTok of bomTokens) {
+            if (tTok.includes(bTok) || bTok.includes(tTok)) return true;
+          }
+        }
+
+        const cleanTarget = target.replace(/[^A-Z0-9\u4e00-\u9fa5]/g, '');
+        const cleanBom = bomSup.replace(/[^A-Z0-9\u4e00-\u9fa5]/g, '');
+        if (cleanTarget && cleanBom) {
+          if (cleanTarget.includes(cleanBom) || cleanBom.includes(cleanTarget)) return true;
+        }
+
+        return false;
+      },
+
+      matchCmfRule(bomColorStr, bomCmfSlot, planCmfSlot) {
+        if (!planCmfSlot || planCmfSlot === 0) return true;
+        if (!bomCmfSlot || bomCmfSlot === 0) return true;
+        const s = String(bomColorStr || '').trim().toUpperCase();
+        if (s.includes('/') || s.includes('、') || s.includes(',') || s.includes(';') || s.includes('&')) {
+          let slots = [];
+          const matches = s.matchAll(/CMF[_\s-]?(\d+)/g);
+          for (const m of matches) slots.push(parseInt(m[1], 10));
+          if (!slots.length) {
+            const digitMatches = s.matchAll(/(\d+)/g);
+            for (const dm of digitMatches) slots.push(parseInt(dm[1], 10));
+          }
+          if (slots.length) return slots.includes(planCmfSlot);
+        }
+        return bomCmfSlot === planCmfSlot;
+      },
+
+      getSlotKey(item) {
+        if (!item) return 'SLOT_UNKNOWN';
+        const descZh = (item.descZh || '').trim();
+        const descEn = (item.descEn || '').trim();
+        const mainDesc = (descZh || descEn || item.pn).toUpperCase();
+
+        const cat = (item.category || '').toLowerCase().trim();
+        const isAccessory = cat === '辅料' || cat === 'screw' || cat === '螺丝' || cat === '隔磁片' || this.isAccessoryKeyword(descZh, descEn);
+
+        if (isAccessory) {
+          return `SLOT_ACC_${mainDesc}_${item.pn}`;
+        }
+        return `SLOT_${mainDesc}`;
+      },
+
+      checkSupplierOrSourceTier(bom, trackerSupplierVal, plan) {
+        const bomSuppliers = `${bom.v1 || ''} ${bom.v2 || ''} ${bom.v3 || ''} ${bom.supplier || ''}`.toUpperCase();
+        if (trackerSupplierVal) {
+          return this.matchSupplierDynamic(bomSuppliers, trackerSupplierVal);
+        }
+        if (bom.isSingleSource) return true;
+        return bom.tier === plan.sourceTier;
+      },
+
+      matchBaseRule(bom, plan, dynamicContext = {}) {
+        if (!bom || !plan) return false;
+        const descZh = bom.descZh || '';
+        const descEn = bom.descEn || '';
+        const fullDesc = `${descZh} ${descEn}`.toUpperCase();
+        const category = (bom.category || '').toLowerCase().trim();
+
+        // 🌟 动态查 BOM 规则 1：仅当 BOM 表中该工段确实有零件定义了 RF/BE 特征时，才进行排产表 RF/BE 过滤
+        const { stationsWithRF, stationsWithSKU } = dynamicContext;
+        if (stationsWithRF && stationsWithRF.has(bom.level)) {
+          const planRFUpper = (plan.rfHole || '').toUpperCase();
+          const isPlanRF = planRFUpper.includes('RF');
+          const isPlanBE = planRFUpper.includes('BE');
+
+          const bomRF = (bom.rfHole || '').toUpperCase();
+          if (bomRF === 'RF' && !isPlanRF) return false;
+          if (bomRF === 'RF_NA' && isPlanRF) return false;
+          if (bomRF === 'BE' && !isPlanBE) return false;
+          if (bomRF === 'BE_NA' && isPlanBE) return false;
+        }
+
+        if (!this.matchCmfRule(bom.color, bom.cmfSlot, plan.cmfSlot)) {
+          return false;
+        }
+
+        if (bom.sim && bom.sim !== '/' && bom.sim !== '0' && bom.sim.toUpperCase() !== 'ALL') {
+          const bomSim = bom.sim.toUpperCase();
+          const planSim = (plan.sim || '').toUpperCase();
+          if (bomSim.includes('DS') && !planSim.includes('DS')) return false;
+          if (bomSim.includes('SS') && !planSim.includes('SS')) return false;
+        }
+
+        // 🌟 动态查 BOM 规则 2：仅当 BOM 表中该工段确实有零件定义了 SKU 区域限定时，才校验排产表的 region
+        if (stationsWithSKU && stationsWithSKU.has(bom.level)) {
+          if (bom.sku && bom.sku !== '/' && bom.sku !== '0' && !bom.sku.toUpperCase().includes('ALL')) {
+            const skuUpper = bom.sku.toUpperCase();
+            if (plan.region && !skuUpper.includes(plan.region.toUpperCase())) {
+              return false;
+            }
+          }
+        }
+
+        // 【类别 A：辅料 / 螺丝 / 隔磁片】
+        if (category === '辅料' || category === '螺丝' || category === 'screw' || 
+            category === '隔磁片' || this.isAccessoryKeyword(descZh, descEn)) {
+          return true;
+        }
+
+        // 【类别 B：自制总成件】
+        if (category === '组件' || bom.isSubAssembly) {
+          if (bom.level === 'L10' && (fullDesc.includes('L3') || fullDesc.includes('CLI'))) {
+            const planRFUpper = (plan.rfHole || '').toUpperCase();
+            const isPlanRF = planRFUpper.includes('RF');
+            if (isPlanRF && !fullDesc.includes('打孔')) return false;
+            if (!isPlanRF && fullDesc.includes('打孔')) return false;
+            if (['BR', 'ARG', 'IN'].includes(plan.region) && !fullDesc.includes('海外')) return false;
+            if (!['BR', 'ARG', 'IN'].includes(plan.region) && fullDesc.includes('海外')) return false;
+          }
+          return true;
+        }
+
+        // 【类别 C：PCB 电路板】
+        if (category === 'pcb') {
+          if (descZh.includes('主板') || fullDesc.includes('MAIN_PCB') || fullDesc.includes('MN PCBA')) {
+            if (plan.pcbaKit) return bom.pn === plan.pcbaKit;
+
+            if (plan.memory && bom.sku) {
+              const normPlanMem = plan.memory.replace(/\s+/g, '');
+              const mSku = bom.sku.toUpperCase().match(/(\d+\s*[\+_]\s*\d+)/);
+              if (mSku) {
+                const normBomMem = mSku[1].replace(/[\s_]+/g, '+');
+                if (normBomMem !== normPlanMem) return false;
+              }
+            }
+            return true;
+          }
+
+          if (descZh.includes('小板组件') || fullDesc.includes('SUB_PCB_RAPTOR') || fullDesc.includes('SUB BRD')) {
+            if (plan.subPcbaKit) return bom.pn === plan.subPcbaKit;
+            return true;
+          }
+
+          return true;
+        }
+
+        // 【类别 D：FPC 柔性电路板】
+        if (category === 'fpc') {
+          if (bom.isSingleSource) return true;
+          if (descZh.includes('主 FPC') || fullDesc.includes('MAIN_FPC')) {
+            return this.checkSupplierOrSourceTier(bom, plan.suppliers.mainFpc, plan);
+          }
+          return this.checkSupplierOrSourceTier(bom, plan.suppliers.otherFpc, plan);
+        }
+
+        // 【类别 E：major / kp 核心大件】
+        if (category === 'major' || category === 'kp') {
+          if (plan.suppliers) {
+            if (descZh.includes('CLI') || (fullDesc.includes('ASSY_CLI') && !fullDesc.includes('FOAM') && !fullDesc.includes('GRAPHITE'))) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.cli, plan);
+            }
+            if (descZh.includes('主屏') || (fullDesc.includes('ASSY_DISPLAY') && !fullDesc.includes('CLI'))) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.display, plan);
+            }
+            if (descZh.includes('中框') || fullDesc.includes('HSG_FLIP') || fullDesc.includes('HSG_BASE') || fullDesc.includes('HOUSING')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.hsg, plan);
+            }
+            if (descZh.includes('inlay') || fullDesc.includes('BASE_INLAY') || fullDesc.includes('FLIP_INLAY')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.inlay, plan);
+            }
+            if (descZh.includes('转轴') && !descZh.includes('转轴盖') && !descZh.includes('石墨') && !descZh.includes('泡棉')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.hinge, plan);
+            }
+            if (descZh.includes('转轴盖') || fullDesc.includes('HINGE_COVER')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.hingeCover, plan);
+            }
+            if (descZh.includes('电池') && !descZh.includes('假电') && !descZh.includes('背胶') && !descZh.includes('泡棉') && !descZh.includes('石墨')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.battery, plan);
+            }
+            if (descZh.includes('A壳') || fullDesc.includes('A_COVER')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.aCover, plan);
+            }
+            if (descZh.includes('retention') || fullDesc.includes('RETENTION')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.retention, plan);
+            }
+            if (descZh.includes('音量键') || descZh.includes('AI键')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.volKey, plan);
+            }
+            if (descZh.includes('卡托')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.simTray, plan);
+            }
+            if (descZh.includes('指纹') && !descZh.includes('支架')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.fps, plan);
+            }
+            if (descZh.includes('马达') || fullDesc.includes('VIB') || fullDesc.includes('MOTOR')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.vibrator, plan);
+            }
+            if (descZh.includes('无线充') || fullDesc.includes('WLC') || fullDesc.includes('NFC')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.wlc, plan);
+            }
+          }
+          if (bom.isSingleSource) return true;
+          return bom.tier === plan.sourceTier;
+        }
+
+        // 【类别 F：五金件 / 塑胶件 / 镜片 / 金属件】
+        if (category === '五金件' || category === '塑胶件' || category === '金属件' || category === '镜片') {
+          if (plan.suppliers) {
+            if (descZh.includes('转轴盖') || fullDesc.includes('HINGE_COVER')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.hingeCover, plan);
+            }
+            if (descZh.includes('retention') || fullDesc.includes('RETENTION')) {
+              return this.checkSupplierOrSourceTier(bom, plan.suppliers.retention, plan);
+            }
+          }
+          if (bom.isSingleSource) return true;
+          return bom.tier === plan.sourceTier;
+        }
+
+        if (bom.isSingleSource) return true;
+        return bom.tier === plan.sourceTier;
+      }
+    });
+
+    // =========================================================================
+    // 【Vue 表现层与数据流控制】
+    // =========================================================================
+    const { createApp, ref, computed, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        const bomFileName = ref('');
+        const trackerFileName = ref('');
+        const bomItems = ref([]);
+        const buildPlans = ref([]);
+        
+        const detectedPhases = ref([]);
+        const currentPhase = ref('');
+        
+        const detectedCmfMap = ref({});
+
+        const viewMode = ref('list');
+        const overviewStation = ref('L10');
+        const searchQuery = ref('');
+        const mainTab = ref('overview');
+        const baselineStation = ref('L10');
+        const activeWorkbenchStation = ref('L10');
+        const exportOnlyPositive = ref(true);
+
+        const customBRMap = ref({});
+        const customFVCMap = ref({});
+        const editDialogVisible = ref(false);
+        const editDialogValue = ref('');
+        const editDialogTarget = ref({ type: 'BR', station: '', key: '', prompt: '' });
+        const dialogInputRef = ref(null);
+
+        // 🌟 在线维护小板硬件版本的独立状态与弹窗控制
+        const customSubPcbRevMap = ref({}); // { PN -> revision }
+        const subPcbModalVisible = ref(false);
+        const tempSubPcbRevs = ref({});
+
+        const bomDragOver = ref(false);
+        const trackerDragOver = ref(false);
+        const drawerVisible = ref(false);
+        const activeRecipeData = ref({ title: '', items: [] });
+
+        const fixedSlotPanel = ref({ visible: false, title: '', items: [] });
+        const fixedSlotSearch = ref('');
+
+        // 🌟 动态嗅探 BOM 各工段是否真正定义了 RF/BE 与 SKU 特征集合
+        const stationsWithRF = computed(() => {
+          const set = new Set();
+          bomItems.value.forEach(it => {
+            const rf = (it.rfHole || '').toUpperCase();
+            if (rf && !['/', '0', 'NONE', 'NA', 'NAN'].includes(rf)) {
+              set.add(it.level);
+            }
+          });
+          return set;
+        });
+
+        const stationsWithSKU = computed(() => {
+          const set = new Set();
+          bomItems.value.forEach(it => {
+            const sku = (it.sku || '').toUpperCase();
+            if (sku && !['/', '0', 'NONE', 'ALL', 'NAN'].includes(sku)) {
+              set.add(it.level);
+            }
+          });
+          return set;
+        });
+
+        const dynamicBOMContext = computed(() => ({
+          stationsWithRF: stationsWithRF.value,
+          stationsWithSKU: stationsWithSKU.value
+        }));
+
+        const openFixedSlotPanel = (title, list) => {
+          fixedSlotSearch.value = '';
+          fixedSlotPanel.value.title = title;
+          fixedSlotPanel.value.items = list || [];
+          fixedSlotPanel.value.visible = true;
+        };
+
+        const filteredFixedSlotItems = computed(() => {
+          const list = fixedSlotPanel.value.items || [];
+          const q = fixedSlotSearch.value.trim().toLowerCase();
+          if (!q) return list;
+          return list.filter(it => {
+            const pn = (it.pn || '').toLowerCase();
+            const desc = (it.descZh || it.desc || '').toLowerCase();
+            const cat = (it.category || '').toLowerCase();
+            const ven = (it.supplier || it.vendor || '').toLowerCase();
+            return pn.includes(q) || desc.includes(q) || cat.includes(q) || ven.includes(q);
+          });
+        });
+
+        const getCmfDisplayName = (slot) => {
+          if (!slot || slot === 0) return '通用';
+          const name = detectedCmfMap.value[slot];
+          return name ? `CMF_${slot}:${name}` : `CMF_${slot}`;
+        };
+
+        const detectedCmfCount = computed(() => Object.keys(detectedCmfMap.value).length || 3);
+
+        // 🌟 动态检索当前 BOM 中属于 L10 小板的所有料号集合
+        const subPcbItemsL10 = computed(() => {
+          return bomItems.value.filter(i => 
+            i.level === 'L10' && 
+            (i.category || '').toLowerCase() === 'pcb' && 
+            (i.descZh || '').includes('小板')
+          );
+        });
+
+        const hasConfiguredSubPcb = computed(() => Object.keys(customSubPcbRevMap.value).length > 0);
+
+        const openSubPcbModal = () => {
+          tempSubPcbRevs.value = {};
+          subPcbItemsL10.value.forEach(item => {
+            tempSubPcbRevs.value[item.pn] = customSubPcbRevMap.value[item.pn] || getItemREV(item) || '';
+          });
+          subPcbModalVisible.value = true;
+        };
+
+        const saveSubPcbRevs = () => {
+          Object.entries(tempSubPcbRevs.value).forEach(([pn, rev]) => {
+            const trimmed = String(rev || '').trim();
+            if (trimmed) {
+              customSubPcbRevMap.value[pn] = trimmed;
+            } else {
+              delete customSubPcbRevMap.value[pn];
+            }
+          });
+          subPcbModalVisible.value = false;
+        };
+
+        const openEditDialog = (type, station, key, initialValue, prompt) => {
+          editDialogTarget.value = { type, station, key, prompt };
+          editDialogValue.value = initialValue;
+          editDialogVisible.value = true;
+          nextTick(() => { if (dialogInputRef.value) dialogInputRef.value.focus(); });
+        };
+
+        const saveEditDialog = () => {
+          const { type, key } = editDialogTarget.value;
+          const val = editDialogValue.value.trim();
+          if (type === 'BR') {
+            if (val) customBRMap.value[key] = val;
+            else delete customBRMap.value[key];
+          } else if (type === 'FVC') {
+            if (val) customFVCMap.value[key] = val;
+            else delete customFVCMap.value[key];
+          }
+          editDialogVisible.value = false;
+        };
+
+        const findMainBOMSheet = (workbook) => {
+          if (!workbook || !workbook.SheetNames || !workbook.SheetNames.length) {
+            throw new Error('未在 Excel 文件中检出任何工作表！');
+          }
+          if (workbook.SheetNames.length === 1) return workbook.SheetNames[0];
+
+          const bomName = workbook.SheetNames.find(n => n.toUpperCase().includes('BOM'));
+          if (bomName && workbook.Sheets[bomName]) return bomName;
+
+          for (const name of workbook.SheetNames) {
+            const ws = workbook.Sheets[name];
+            if (!ws || !ws['!ref']) continue;
+            try {
+              const sample = XLSX.utils.sheet_to_json(ws, { header: 1 });
+              for (let i = 0; i < Math.min(sample.length, 10); i++) {
+                const rowStr = (sample[i] || []).join(' ').toUpperCase();
+                if ((rowStr.includes('LEVEL') || rowStr.includes('工段')) && (rowStr.includes('PN') || rowStr.includes('料号'))) {
+                  return name;
+                }
+              }
+            } catch (e) {}
+          }
+          return workbook.SheetNames[0];
+        };
+
+        const findBuildTrackerSheet = (workbook) => {
+          if (!workbook || !workbook.SheetNames || !workbook.SheetNames.length) {
+            throw new Error('未检出有效工作表！');
+          }
+          for (const name of workbook.SheetNames) {
+            const ws = workbook.Sheets[name];
+            if (!ws || !ws['!ref']) continue;
+            try {
+              const sample = XLSX.utils.sheet_to_json(ws, { header: 1 });
+              for (let i = 0; i < Math.min(sample.length, 30); i++) {
+                const rowStr = (sample[i] || []).join(' ');
+                if (rowStr.includes('FVC Information') || (rowStr.includes('Build Quantity') && (rowStr.includes('CMF') || rowStr.includes('Color')))) {
+                  return name;
+                }
+              }
+            } catch (e) {}
+          }
+          return workbook.SheetNames.find(n => n.includes('Plan') || n.includes('Tracker') || n.includes('Master')) || workbook.SheetNames[0];
+        };
+
+        const parseBOMBuffer = (rawBuffer) => {
+          try {
+            const workbook = XLSX.read(rawBuffer, { type: 'array' });
+            const sheetName = findMainBOMSheet(workbook);
+            const worksheet = workbook.Sheets[sheetName];
+            if (!worksheet) throw new Error(`未找到主发料工作表 [${sheetName}]！`);
+
+            const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            executeBOMDataParse(rows);
+          } catch (err) {
+            alert(`❌ BOM 文件解析失败:\n原因: ${err.message}\n请检查控制台 (F12) 查看详细信息。`);
+            console.error('BOM 解析完整报错:', err);
+          }
+        };
+
+        const handleBOMUpload = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          bomFileName.value = file.name;
+          const reader = new FileReader();
+          reader.onload = (evt) => parseBOMBuffer(evt.target.result);
+          reader.readAsArrayBuffer(file);
+          e.target.value = '';
+        };
+
+        const handleBOMDrop = (e) => {
+          bomDragOver.value = false;
+          const file = e.dataTransfer.files[0];
+          if (!file) return;
+          bomFileName.value = file.name;
+          const reader = new FileReader();
+          reader.onload = (evt) => parseBOMBuffer(evt.target.result);
+          reader.readAsArrayBuffer(file);
+        };
+
+        const executeBOMDataParse = (rows) => {
+          if (!rows || rows.length < 2) {
+            throw new Error('BOM 表格内容为空或没有有效数据行！');
+          }
+
+          let headerIdx = -1;
+          for (let i = 0; i < Math.min(rows.length, 10); i++) {
+            const rowStr = (rows[i] || []).join(' ').toUpperCase();
+            if (rowStr.includes('PN') || rowStr.includes('料号')) {
+              headerIdx = i;
+              break;
+            }
+          }
+          if (headerIdx === -1) headerIdx = 0;
+
+          const headers = rows[headerIdx].map(h => String(h || '').trim());
+          const colPN = headers.findIndex(h => h.toUpperCase() === 'PN' || h === '料号');
+          const colLevel = headers.findIndex(h => h.toUpperCase() === 'LEVEL' || h === '工段');
+          
+          if (colPN === -1) throw new Error('未在 BOM 表头中检测到 [PN / 料号] 列！');
+          if (colLevel === -1) throw new Error('未在 BOM 表头中检测到 [Level / 工段] 列！');
+
+          const colCategory = headers.findIndex(h => h.includes('类别') || h.toUpperCase() === 'CATEGORY' || h === '分类');
+          const colDescZh = headers.findIndex(h => h.includes('中文描述') || h === '描述');
+          const colDescEn = headers.findIndex(h => h.includes('英文描述'));
+          const colColor = headers.findIndex(h => h.toUpperCase() === 'COLOR' || h === '颜色');
+          const colSKU = headers.findIndex(h => h.toUpperCase() === 'SKU');
+          const colQty = headers.findIndex(h => h.toUpperCase() === 'QTY' || h === '数量');
+          const colV1 = headers.findIndex(h => h === '一供');
+          const colV2 = headers.findIndex(h => h === '二供');
+          const colV3 = headers.findIndex(h => h === '三供');
+          const colSupplierTier = headers.findIndex(h => h.includes('Supplier') && (h.includes('1/2') || h.includes('1')));
+          const colSim = headers.findIndex(h => h.includes('SIM'));
+          const colRF = headers.findIndex(h => h.includes('RF hole') || h.includes('RF'));
+          const colComment = headers.findIndex(h => h.toUpperCase() === 'COMMENT');
+
+          const localCmfMap = { ...detectedCmfMap.value };
+          if (colColor !== -1) {
+            for (let r = headerIdx + 1; r < rows.length; r++) {
+              const cVal = String(rows[r]?.[colColor] || '').trim();
+              if (cVal && !['/', '0', 'NONE', 'ALL'].includes(cVal.toUpperCase())) {
+                const m = cVal.match(/CMF[_\s-]?(\d+)[:：\s]*([^\s/,;、&]+)?/i);
+                if (m) {
+                  const sNum = parseInt(m[1], 10);
+                  const sName = (m[2] || '').trim();
+                  if (!localCmfMap[sNum] && sName) localCmfMap[sNum] = sName;
+                }
+              }
+            }
+          }
+          detectedCmfMap.value = localCmfMap;
+
+          const phaseRegex = /(EVT\d*|DVT\d*|PVT\d*|MP\d*|PILOT\d*|PROTO\d*)/i;
+          const dynamicPhaseCols = [];
+
+          headers.forEach((h, cIdx) => {
+            const cleaned = h.trim();
+            if (cIdx !== colPN && cIdx !== colLevel && phaseRegex.test(cleaned)) {
+              dynamicPhaseCols.push({ name: cleaned.toUpperCase(), colIdx: cIdx, validCount: 0 });
+            }
+          });
+
+          const rawList = [];
+
+          for (let r = headerIdx + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row || row.length === 0) continue;
+
+            let pn = String(row[colPN] || '').trim();
+            const levelRaw = String(row[colLevel] || '').trim().toUpperCase();
+
+            if (!levelRaw || ['/', '0', 'NAN', 'UNDEFINED'].includes(levelRaw)) continue;
+
+            let level = levelRaw;
+            if (level.includes('L3')) level = 'L3';
+            else if (level.includes('L4')) level = 'L4';
+            else if (level.includes('L5')) level = 'L5';
+            else if (level.includes('L10')) level = 'L10';
+
+            const descZh = colDescZh !== -1 ? String(row[colDescZh] || '').trim() : '';
+            const descEn = colDescEn !== -1 ? String(row[colDescEn] || '').trim() : '';
+            let category = colCategory !== -1 ? String(row[colCategory] || '').trim() : '';
+
+            const isSubAssembly = category === '组件' || 
+              descZh.startsWith('L4-') || descZh.startsWith('L5-') || descZh.startsWith('L3 ') || 
+              descEn.startsWith('L4_') || descEn.startsWith('L5_') || descEn.startsWith('L3_');
+
+            if (!pn) {
+              if (isSubAssembly) pn = `TBD_${level}_${descZh || descEn}`.replace(/\s+/g, '_');
+              else continue;
+            }
+            if (pn.toUpperCase() === 'PN' || pn === '料号') continue;
+
+            if (isSubAssembly && !category) category = '组件';
+            if (!category && RULE_ENGINE.isAccessoryKeyword(descZh, descEn)) category = '辅料';
+
+            const v1Val = RULE_ENGINE.cleanVendor(colV1 !== -1 ? row[colV1] : '');
+            const v2Val = RULE_ENGINE.cleanVendor(colV2 !== -1 ? row[colV2] : '');
+            const v3Val = RULE_ENGINE.cleanVendor(colV3 !== -1 ? row[colV3] : '');
+            const tierVal = colSupplierTier !== -1 ? String(row[colSupplierTier] || '').trim() : '';
+            const rfVal = colRF !== -1 ? String(row[colRF] || '').trim().toUpperCase() : '';
+
+            let featureTag = '常规通用';
+            if (rfVal === 'RF') featureTag = 'RF(打孔机)';
+            else if (rfVal === 'BE') featureTag = 'BE(假电)';
+            else if (rfVal === 'RF_NA') featureTag = '非打孔专用(RF_NA)';
+            else if (rfVal === 'BE_NA') featureTag = '真电专用(BE_NA)';
+
+            const rawColor = colColor !== -1 ? String(row[colColor] || '').trim() : '';
+
+            const revMap = {};
+            dynamicPhaseCols.forEach(p => {
+              const val = String(row[p.colIdx] || '').trim();
+              const isValid = val && !['/', '0', 'NAN', 'NA'].includes(val);
+              revMap[p.name] = isValid ? val : '';
+              if (isValid) p.validCount++;
+            });
+
+            let tier = '独供';
+            let isSingleSource = true;
+
+            if (tierVal && !['/', '0', 'NA', 'NAN'].includes(tierVal.toUpperCase())) {
+              if (tierVal.includes('2')) {
+                tier = '二供';
+                isSingleSource = false;
+              } else if (tierVal.includes('3')) {
+                tier = '三供';
+                isSingleSource = false;
+              } else if (tierVal.includes('1')) {
+                tier = '一供';
+                isSingleSource = false;
+              }
+            }
+
+            rawList.push({
+              pn,
+              level,
+              category,
+              descZh,
+              descEn,
+              isSubAssembly,
+              color: rawColor,
+              cmfSlot: RULE_ENGINE.extractCmfSlot(rawColor, localCmfMap),
+              sku: colSKU !== -1 ? String(row[colSKU] || '').trim() : '',
+              qty: colQty !== -1 ? (parseFloat(row[colQty]) || 1) : 1,
+              v1: v1Val,
+              v2: v2Val,
+              v3: v3Val,
+              tierVal,
+              tier,
+              isSingleSource,
+              supplier: v1Val || v2Val || v3Val || '',
+              sim: colSim !== -1 ? String(row[colSim] || '').trim() : '',
+              rfHole: rfVal,
+              featureTag,
+              comment: colComment !== -1 ? String(row[colComment] || '').trim() : '',
+              revMap
+            });
+          }
+
+          if (!rawList.length) {
+            throw new Error('未提取到有效的一级发料物料（请检查 Level 列是否有标明 L3/L4/L5/L10）！');
+          }
+
+          detectedPhases.value = dynamicPhaseCols.map(p => p.name);
+
+          const firstPopulatedPhase = dynamicPhaseCols.find(p => p.validCount > 0);
+          if (firstPopulatedPhase) {
+            currentPhase.value = firstPopulatedPhase.name;
+          } else if (detectedPhases.value.length > 0) {
+            currentPhase.value = detectedPhases.value[0];
+          }
+
+          bomItems.value = rawList;
+        };
+
+        const getItemREV = (bom) => {
+          if (!bom) return '';
+          // 🌟 检查是否有用户在线维护的小板版本覆盖
+          if (customSubPcbRevMap.value[bom.pn]) {
+            return customSubPcbRevMap.value[bom.pn];
+          }
+          if (bom.revMap && currentPhase.value && bom.revMap[currentPhase.value]) {
+            return bom.revMap[currentPhase.value];
+          }
+          return '';
+        };
+
+        const parseTrackerBuffer = (rawBuffer) => {
+          try {
+            const workbook = XLSX.read(rawBuffer, { type: 'array' });
+            const sheetName = findBuildTrackerSheet(workbook);
+            const worksheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            if (!rows || rows.length < 15) return;
+
+            const rowMapping = {};
+            for (let r = 0; r < Math.min(rows.length, 60); r++) {
+              const rowStr = (rows[r] || []).map(c => String(c || '')).join(' ').toUpperCase();
+              
+              if (rowStr.includes('FVC INFORMATION')) rowMapping.rFVC = r;
+              if (rowStr.includes('PRODUCT VERSION')) rowMapping.rPhase = r;
+              if (rowStr.includes('BUILD QUANTITY')) rowMapping.rQty = r;
+              if (rowStr.includes('SOURCE') && !rowStr.includes('SOURCING')) rowMapping.rSource = r;
+              
+              if ((rowStr.includes('CMF') || rowStr.includes('COLOR') || rowStr.includes('颜色')) && 
+                  !rowStr.includes('HOUSING') && !rowStr.includes('METAL') && !rowStr.includes('KIT')) {
+                rowMapping.rColor = r;
+              }
+              
+              if (rowStr.includes('MARKET') || rowStr.includes('REGION')) rowMapping.rRegion = r;
+              if (rowStr.includes('PCBA KIT #') || rowStr.includes('PCBA KIT')) rowMapping.rPCBAKit = r;
+              if (rowStr.includes('SUB PCBA') && !rowStr.includes('FVC')) rowMapping.rSubPCBA = r;
+              
+              if (rowStr.includes('MEMORY SIZE RAM') || rowStr.includes('RAM(UMCP)')) rowMapping.rRAM = r;
+              if (rowStr.includes('MEMORY SIZE STORAGE') && !rowStr.includes('SUPPLIER')) rowMapping.rROM = r;
+
+              if (rowStr.includes('MAIN DISPLAY')) rowMapping.rDisplay = r;
+              if (rowStr.includes('HINGE COVER')) rowMapping.rHingeCover = r;
+              if ((rowStr.includes('METAL HOUSING') || rowStr.includes('HSG') || rowStr.includes('HOUSING')) && !rowStr.includes('HINGE')) rowMapping.rHSG = r;
+              if (rowStr.includes('INLAY') && !rowStr.includes('PCB')) rowMapping.rInlay = r;
+              if (rowStr.includes('A COVER') || rowStr.includes('A_COVER')) rowMapping.rACover = r;
+              if (rowStr.includes('RETENTION') || rowStr.includes('RETATION')) rowMapping.rRetention = r;
+              if (rowStr.includes('BATTERY')) rowMapping.rBattery = r;
+              if (rowStr.includes('CLI DISPLAY')) rowMapping.rCLI = r;
+              if (rowStr.includes('FPS')) rowMapping.rFPS = r;
+              if (rowStr.includes('MAIN FPC')) rowMapping.rMainFPC = r;
+              if (rowStr.includes('OTHER FPC')) rowMapping.rOtherFPC = r;
+              if (rowStr.includes('VOL') && rowStr.includes('KEY')) rowMapping.rVolKey = r;
+              if (rowStr.includes('SIM TRAY') || rowStr.includes('SIDE KEY')) rowMapping.rSimTray = r;
+              if (rowStr.includes('HINGE') && !rowStr.includes('HINGE COVER')) rowMapping.rHinge = r;
+              if (rowStr.includes('VIBRATOR') || rowStr.includes('MOTOR') || rowStr.includes('马达')) rowMapping.rVibrator = r;
+              if (rowStr.includes('NFC') || rowStr.includes('WLC') || rowStr.includes('无线充')) rowMapping.rWLC = r;
+              if (rowStr.includes('SIM (SINGLE / DUAL)')) rowMapping.rSim = r;
+              if (rowStr.includes('RF HOLE') || rowStr.includes('BE HOLE')) rowMapping.rRF = r;
+              if (rowStr.includes('DISPLAY MARKING')) rowMapping.rMarking = r;
+              if (rowStr.includes('BR NUMBER') && !rowStr.includes('IN HOUSE')) rowMapping.rBRNum = r;
+            }
+
+            const localCmfMap = { ...detectedCmfMap.value };
+            if (rowMapping.rColor !== undefined) {
+              const colorRow = rows[rowMapping.rColor] || [];
+              for (let c = 0; c < colorRow.length; c++) {
+                const cellStr = String(colorRow[c] || '').trim();
+                const m = cellStr.match(/(\d+)\s*CMF\s*\n?([^\n\r]+)?/i);
+                if (m) {
+                  const sNum = parseInt(m[1], 10);
+                  const sName = (m[2] || '').trim();
+                  if (sName && (!localCmfMap[sNum] || sName.length > localCmfMap[sNum].length)) {
+                    localCmfMap[sNum] = sName;
+                  }
+                }
+              }
+            }
+            detectedCmfMap.value = localCmfMap;
+
+            const getTrackerVal = (k, c) => {
+              const r = rowMapping[k];
+              if (r === undefined || r < 0) return '';
+              return String(rows[r]?.[c] || '').trim().toUpperCase();
+            };
+
+            const totalCols = rows[0]?.length || 0;
+            let startCol = -1;
+            for (let col = 0; col < totalCols; col++) {
+              const cellVal = String(rows[rowMapping.rFVC]?.[col] || '').trim();
+              if (cellVal && !cellVal.includes('FVC Information') && !cellVal.includes('HW Revision')) {
+                startCol = col;
+                break;
+              }
+            }
+            if (startCol === -1) startCol = 7;
+
+            const trackerPhase = String(rows[rowMapping.rPhase]?.[startCol] || '').trim().toUpperCase();
+            const matchedPhase = detectedPhases.value.find(p => p.includes(trackerPhase) || trackerPhase.includes(p));
+            if (matchedPhase) {
+              currentPhase.value = matchedPhase;
+            }
+
+            const plans = [];
+            let autoLotIndex = 1;
+
+            for (let col = startCol; col < totalCols; col++) {
+              const rawTitle = String(rows[rowMapping.rFVC]?.[col] || '').trim();
+              if (!rawTitle || rawTitle === 'nan' || rawTitle === '') continue;
+              const qty = parseInt(rows[rowMapping.rQty]?.[col], 10) || 0;
+              if (qty <= 0) continue;
+
+              const brNum = String(rows[rowMapping.rBRNum]?.[col] || '').trim() || `BR_Default`;
+              const fvcCode = `Lot-${String(autoLotIndex).padStart(2, '0')}`;
+              autoLotIndex++;
+
+              const rawColor = String(rows[rowMapping.rColor]?.[col] || '').trim();
+              const cmfSlot = RULE_ENGINE.extractCmfSlot(rawColor, localCmfMap) || RULE_ENGINE.extractCmfSlot(rawTitle, localCmfMap);
+
+              const rawMarket = String(rows[rowMapping.rRegion]?.[col] || '').trim().toUpperCase();
+              let region = 'ROW';
+              if (rawMarket.includes('JP') || rawMarket.includes('SB')) {
+                region = 'JP';
+              } else if (rawMarket.includes('US') || rawMarket.includes('CANADA') || rawMarket.includes('T-MOBILE') || 
+                         rawMarket.includes('AT&T') || rawMarket.includes('CRICKET') || rawMarket.includes('BOOST') || 
+                         rawMarket.includes('DISH') || rawMarket.includes('VERIZON')) {
+                region = 'NA';
+              } else if (rawMarket.includes('PRC')) {
+                region = 'PRC';
+              }
+
+              const rawPcbaKit = String(rows[rowMapping.rPCBAKit]?.[col] || '').trim();
+              const rawSubKit = String(rows[rowMapping.rSubPCBA]?.[col] || '').trim();
+              const pcbaKit = RULE_ENGINE.isValidKitNumber(rawPcbaKit) ? rawPcbaKit : '';
+              const subPcbaKit = RULE_ENGINE.isValidKitNumber(rawSubKit) ? rawSubKit : '';
+
+              const rawRam = rowMapping.rRAM !== undefined ? String(rows[rowMapping.rRAM]?.[col] || '').replace(/[^0-9]/g, '') : '';
+              const rawRom = rowMapping.rROM !== undefined ? String(rows[rowMapping.rROM]?.[col] || '').replace(/[^0-9]/g, '') : '';
+              const memory = (rawRam && rawRom) ? `${rawRam}+${rawRom}` : '';
+
+              const rawSource = String(rows[rowMapping.rSource]?.[col] || '1').trim().toUpperCase();
+              let sourceTier = '一供';
+              if (rawSource.includes('2') || rawSource.includes('SECOND')) sourceTier = '二供';
+              else if (rawSource.includes('3') || rawSource.includes('THIRD')) sourceTier = '三供';
+
+              const volKeyVal = getTrackerVal('rVolKey', col);
+              const simTrayVal = getTrackerVal('rSimTray', col);
+
+              const suppliers = {
+                display: getTrackerVal('rDisplay', col),
+                hingeCover: getTrackerVal('rHingeCover', col),
+                hsg: getTrackerVal('rHSG', col),
+                inlay: getTrackerVal('rInlay', col),
+                aCover: getTrackerVal('rACover', col),
+                retention: getTrackerVal('rRetention', col),
+                battery: getTrackerVal('rBattery', col),
+                cli: getTrackerVal('rCLI', col),
+                fps: getTrackerVal('rFPS', col),
+                mainFpc: getTrackerVal('rMainFPC', col),
+                otherFpc: getTrackerVal('rOtherFPC', col),
+                volKey: volKeyVal || simTrayVal,
+                simTray: simTrayVal,
+                hinge: getTrackerVal('rHinge', col),
+                vibrator: getTrackerVal('rVibrator', col),
+                wlc: getTrackerVal('rWLC', col)
+              };
+
+              plans.push({
+                id: 'P_' + col,
+                fvc: fvcCode,
+                brNum,
+                name: rawTitle,
+                region,
+                color: rawColor,
+                cmfSlot,
+                pcbaKit,
+                subPcbaKit,
+                memory,
+                sim: String(rows[rowMapping.rSim]?.[col] || 'DS').trim(),
+                rfHole: String(rows[rowMapping.rRF]?.[col] || 'Normal').trim(),
+                displayMarking: String(rows[rowMapping.rMarking]?.[col] || 'Security').trim(),
+                sourceTier,
+                suppliers,
+                qty
+              });
+            }
+
+            buildPlans.value = plans;
+          } catch (err) {
+            alert('❌ Build Tracker 解析失败: ' + err.message);
+          }
+        };
+
+        const handleTrackerUpload = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          trackerFileName.value = file.name;
+          const reader = new FileReader();
+          reader.onload = (evt) => parseTrackerBuffer(evt.target.result);
+          reader.readAsArrayBuffer(file);
+          e.target.value = '';
+        };
+
+        const handleTrackerDrop = (e) => {
+          trackerDragOver.value = false;
+          const file = e.dataTransfer.files[0];
+          if (!file) return;
+          trackerFileName.value = file.name;
+          const reader = new FileReader();
+          reader.onload = (evt) => parseTrackerBuffer(evt.target.result);
+          reader.readAsArrayBuffer(file);
+        };
+
+        // 3. 全局运算中心
+        const brResults = computed(() => {
+          if (!bomItems.value.length) return [];
+
+          return bomItems.value.map(bom => {
+            let totalBR = 0;
+            const allocations = {};
+
+            if (buildPlans.value.length > 0) {
+              buildPlans.value.forEach(plan => {
+                if (plan.qty > 0 && RULE_ENGINE.matchBaseRule(bom, plan, dynamicBOMContext.value)) {
+                  const subQty = bom.qty * plan.qty;
+                  totalBR += subQty;
+                  allocations[plan.id] = {
+                    planName: plan.fvc,
+                    brQty: subQty,
+                    unitQty: bom.qty,
+                    rev: getItemREV(bom) || 'TBD'
+                  };
+                }
+              });
+            }
+
+            return {
+              level: bom.level,
+              category: bom.category,
+              pn: bom.pn,
+              descZh: bom.descZh,
+              isSubAssembly: bom.isSubAssembly,
+              color: bom.color,
+              cmfSlot: bom.cmfSlot,
+              tier: bom.tier,
+              isSingleSource: bom.isSingleSource,
+              featureTag: bom.featureTag,
+              supplier: bom.supplier,
+              rev: getItemREV(bom) || (bom.isSubAssembly ? 'FVC' : ''),
+              unitQty: bom.qty,
+              totalBRQty: totalBR,
+              allocations
+            };
+          });
+        });
+
+        // 4. 核心差异判定引擎：纯按【SLOT 槽位】为核销单元
+        const computeStationDiff = (station, plan, matchedItems) => {
+          const stItems = bomItems.value.filter(i => i.level === station);
+          if (!stItems.length) return null;
+
+          const planRFUpper = (plan.rfHole || '').toUpperCase();
+          const isPlanRF = planRFUpper.includes('RF');
+          const isPlanBE = planRFUpper.includes('BE');
+
+          const expectedSlotMap = new Map();
+          stItems.forEach(it => {
+            if (stationsWithRF.value.has(it.level)) {
+              const bomRF = (it.rfHole || '').toUpperCase();
+              if (bomRF === 'RF' && !isPlanRF) return;
+              if (bomRF === 'RF_NA' && isPlanRF) return;
+              if (bomRF === 'BE' && !isPlanBE) return;
+              if (bomRF === 'BE_NA' && isPlanBE) return;
+            }
+
+            if (stationsWithSKU.value.has(it.level)) {
+              if (it.sku && it.sku !== '/' && it.sku !== '0' && !it.sku.toUpperCase().includes('ALL')) {
+                if (plan.region && !it.sku.toUpperCase().includes(plan.region.toUpperCase())) return;
+              }
+            }
+
+            const slotKey = RULE_ENGINE.getSlotKey(it);
+            if (!expectedSlotMap.has(slotKey)) {
+              expectedSlotMap.set(slotKey, {
+                slotKey,
+                slotName: it.descZh || it.descEn || it.pn,
+                category: it.category,
+                candidatePNs: [it.pn]
+              });
+            } else {
+              expectedSlotMap.get(slotKey).candidatePNs.push(it.pn);
+            }
+          });
+
+          const actualOccupiedSlotMap = new Map();
+          matchedItems.forEach(it => {
+            const slotKey = RULE_ENGINE.getSlotKey(it);
+            actualOccupiedSlotMap.set(slotKey, it);
+          });
+
+          const missing = [];
+          expectedSlotMap.forEach((expSlot, slotKey) => {
+            if (!actualOccupiedSlotMap.has(slotKey)) {
+              missing.push({
+                slotKey,
+                slotName: expSlot.slotName
+              });
+            }
+          });
+
+          const redundant = [];
+          actualOccupiedSlotMap.forEach((actItem, slotKey) => {
+            if (!expectedSlotMap.has(slotKey) && !actItem.category?.includes('组件')) {
+              redundant.push({
+                slotKey,
+                slotName: actItem.descZh || actItem.descEn || actItem.pn
+              });
+            }
+          });
+
+          return {
+            isPass: missing.length === 0 && redundant.length === 0,
+            expectedCount: expectedSlotMap.size,
+            actualCount: actualOccupiedSlotMap.size,
+            missing,
+            redundant
+          };
+        };
+
+        // 5. 工段前道聚类计算
+        const calculateColorBRGroups = (station, upstreamFVCLookup = {}) => {
+          const stItems = bomItems.value.filter(i => i.level === station);
+          if (!stItems.length || !buildPlans.value.length) return { brGroups: [], planFVCLookup: {} };
+
+          // 🌟 核心原则保持：L3 工段绝不排入 RF 打孔样机批次（打孔样机走独立物料，不投 L3 正常总成）
+          const eligiblePlans = station === 'L3'
+            ? buildPlans.value.filter(p => !p.rfHole.toUpperCase().includes('RF'))
+            : buildPlans.value;
+
+          if (!eligiblePlans.length) return { brGroups: [], planFVCLookup: {} };
+
+          const bucketMap = {};
+          eligiblePlans.forEach(plan => {
+            const bucketKey = station === 'L3' ? '通用' : (plan.cmfSlot ? `CMF_${plan.cmfSlot}` : '通用');
+            if (!bucketMap[bucketKey]) bucketMap[bucketKey] = [];
+            bucketMap[bucketKey].push(plan);
+          });
+
+          const brGroups = [];
+          const planFVCLookup = {};
+
+          Object.keys(bucketMap).forEach(bucketKey => {
+            const bucketPlans = bucketMap[bucketKey];
+            const samplePlan = bucketPlans[0];
+            const brNumKey = `${station}_BR_${bucketKey}`;
+
+            const defaultBR = station === 'L3' ? 'BR_L3_TBD' : `BR_${station}_${bucketKey}_TBD`;
+            const finalBRNum = customBRMap.value[brNumKey] || defaultBR;
+
+            const clusterMap = {};
+
+            bucketPlans.forEach(plan => {
+              const matchedItems = stItems.filter(bom => RULE_ENGINE.matchBaseRule(bom, plan, dynamicBOMContext.value));
+
+              const activeItems = matchedItems.map(bom => {
+                let dynamicRev = getItemREV(bom);
+                if (bom.isSubAssembly && station === 'L5') {
+                  dynamicRev = upstreamFVCLookup.L4?.[plan.id] || 'L4_FVC_TBD';
+                }
+                return {
+                  pn: bom.pn,
+                  desc: bom.descEn || bom.descZh,
+                  descZh: bom.descZh,
+                  descEn: bom.descEn,
+                  category: bom.category,
+                  supplier: bom.supplier,
+                  rev: dynamicRev || 'TBD',
+                  qty: bom.qty,
+                  vendor: bom.supplier || '-'
+                };
+              });
+
+              // 🌟 FVC 聚类指纹纯粹基于 [PN + Vendor + Rev + Qty]
+              const signature = activeItems.map(it => `${it.pn}_${it.vendor}_${it.rev}_${it.qty}`).sort().join('||');
+
+              if (!clusterMap[signature]) {
+                clusterMap[signature] = {
+                  signature,
+                  items: activeItems,
+                  plans: [],
+                  totalQty: 0,
+                  diffInfo: computeStationDiff(station, plan, activeItems)
+                };
+              }
+              clusterMap[signature].plans.push(plan);
+              clusterMap[signature].totalQty += plan.qty;
+            });
+
+            const recipes = Object.values(clusterMap);
+            let brTotalQty = 0;
+
+            recipes.forEach((grp, rIdx) => {
+              const fvcKey = `${station}_FVC_${bucketKey}_${rIdx + 1}`;
+              const rNumStr = String(rIdx + 1).padStart(2, '0');
+
+              const defaultVirtualFVC = station === 'L3'
+                ? `L3_FVC_${rNumStr}`
+                : `${station}_FVC_${bucketKey}_${rNumStr}`;
+
+              const hasCustomFVC = !!customFVCMap.value[fvcKey];
+              const finalFVC = hasCustomFVC ? customFVCMap.value[fvcKey] : defaultVirtualFVC;
+
+              grp.fvcCode = finalFVC;
+              grp.fvcKey = fvcKey;
+              grp.isVirtualFVC = !hasCustomFVC;
+              grp.id = `${fvcKey}_id`;
+
+              brTotalQty += grp.totalQty;
+
+              grp.plans.forEach(p => {
+                planFVCLookup[p.id] = finalFVC;
+              });
+            });
+
+            brGroups.push({
+              station,
+              cmfSlot: samplePlan.cmfSlot,
+              brNumKey,
+              brNum: finalBRNum,
+              isVirtualBR: !customBRMap.value[brNumKey],
+              totalQty: brTotalQty,
+              recipes
+            });
+          });
+
+          return { brGroups, planFVCLookup };
+        };
+
+        const l3Result = computed(() => calculateColorBRGroups('L3'));
+        const l4Result = computed(() => calculateColorBRGroups('L4'));
+        const l5Result = computed(() => calculateColorBRGroups('L5', { L4: l4Result.value.planFVCLookup }));
+
+        const l3BRGroups = computed(() => l3Result.value.brGroups || []);
+        const l4BRGroups = computed(() => l4Result.value.brGroups || []);
+        const l5BRGroups = computed(() => l5Result.value.brGroups || []);
+
+        const l10BRGroups = computed(() => {
+          const l10Items = bomItems.value.filter(i => i.level === 'L10');
+          if (!l10Items.length || !buildPlans.value.length) return [];
+
+          const groupDict = {};
+          buildPlans.value.forEach(plan => {
+            const brKey = plan.brNum || 'BR_Default';
+            if (!groupDict[brKey]) {
+              groupDict[brKey] = {
+                station: 'L10',
+                cmfSlot: plan.cmfSlot,
+                brNum: brKey,
+                totalQty: 0,
+                recipes: []
+              };
+            }
+
+            const matchedItems = l10Items.filter(b => RULE_ENGINE.matchBaseRule(b, plan, dynamicBOMContext.value)).map(b => {
+              // 🌟 自动优先读取在线维护的小板版本
+              let dynamicRev = getItemREV(b);
+              if (b.isSubAssembly) {
+                if (b.descZh.includes('L3') || b.descEn.includes('L3_') || b.descZh.includes('CLI')) {
+                  dynamicRev = l3Result.value.planFVCLookup[plan.id] || 'L3_FVC_TBD';
+                } else if (b.descZh.includes('L5') || b.descEn.includes('L5_')) {
+                  dynamicRev = l5Result.value.planFVCLookup[plan.id] || 'L5_FVC_TBD';
+                }
+              }
+              return {
+                pn: b.pn,
+                desc: b.descEn || b.descZh,
+                descZh: b.descZh,
+                descEn: b.descEn,
+                category: b.category,
+                supplier: b.supplier,
+                rev: dynamicRev || 'TBD',
+                qty: b.qty,
+                vendor: b.supplier || '-'
+              };
+            });
+
+            const l3fvc = l3Result.value.planFVCLookup[plan.id] || 'L3_FVC_TBD';
+            const l5fvc = l5Result.value.planFVCLookup[plan.id] || 'L5_FVC_TBD';
+
+            groupDict[brKey].totalQty += plan.qty;
+            groupDict[brKey].recipes.push({
+              id: `L10_${plan.id}`,
+              fvcCode: plan.fvc,
+              totalQty: plan.qty,
+              plan,
+              plans: [plan],
+              items: matchedItems,
+              l3FVC: l3fvc,
+              l5FVC: l5fvc,
+              diffInfo: computeStationDiff('L10', plan, matchedItems)
+            });
+          });
+
+          return Object.values(groupDict);
+        });
+
+        const getRecipeKeyTags = (station, rec) => {
+          const samplePlan = rec.plans[0];
+          const tags = [];
+
+          if (station === 'L3') {
+            const cliItem = rec.items.find(i => (i.descZh || '').includes('CLI'));
+            if (cliItem && cliItem.vendor) {
+              tags.push({ text: `外屏:${cliItem.vendor}`, colorClass: 'bg-emerald-50 text-emerald-800 border-emerald-200' });
+            }
+            const decoItem = rec.items.find(i => (i.descZh || '').toUpperCase().includes('DECO'));
+            if (decoItem && decoItem.vendor) {
+              tags.push({ text: `Deco:${decoItem.vendor}`, colorClass: 'bg-indigo-50 text-indigo-800 border-indigo-200' });
+            }
+          } 
+          else if (station === 'L4') {
+            tags.push({ text: getCmfDisplayName(samplePlan.cmfSlot), colorClass: 'bg-purple-50 text-purple-800 border-purple-200 font-bold' });
+            if (samplePlan.suppliers && samplePlan.suppliers.hsg) {
+              tags.push({ text: `中框:${samplePlan.suppliers.hsg}`, colorClass: 'bg-slate-100 text-slate-700 border-slate-200' });
+            }
+          } 
+          else if (station === 'L5') {
+            const fvc = l4Result.value.planFVCLookup[samplePlan.id] || 'L4_FVC_TBD';
+            tags.push({ text: `L4投入: ${fvc}`, colorClass: 'bg-purple-50 text-purple-800 border-purple-200 font-mono font-bold' });
+            if (samplePlan.suppliers && samplePlan.suppliers.display) {
+              tags.push({ text: `主屏:${samplePlan.suppliers.display}`, colorClass: 'bg-blue-50 text-blue-800 border-blue-200' });
+            }
+          } 
+          else if (station === 'L10') {
+            tags.push({ text: `L5: ${rec.l5FVC}`, colorClass: 'bg-purple-50 text-purple-800 border-purple-200 font-mono font-bold' });
+            tags.push({ text: `L3: ${rec.l3FVC}`, colorClass: 'bg-indigo-50 text-indigo-800 border-indigo-200 font-mono font-bold' });
+            if (samplePlan.cmfSlot) tags.push({ text: getCmfDisplayName(samplePlan.cmfSlot), colorClass: 'bg-purple-50 text-purple-700 border-purple-200' });
+            if (samplePlan.memory) tags.push({ text: samplePlan.memory, colorClass: 'bg-slate-100 text-slate-600 border-slate-200 font-mono' });
+          }
+
+          return tags;
+        };
+
+        const getBRUniquePNCount = (brGroup) => {
+          if (!brGroup || !brGroup.recipes) return 0;
+          const pnSet = new Set();
+          brGroup.recipes.forEach(r => {
+            (r.items || []).forEach(it => pnSet.add(it.pn));
+          });
+          return pnSet.size;
+        };
+
+        const frontStationsSummary = computed(() => {
+          const rows = [];
+          let totalBRCount = 0, totalRecipeCount = 0, grandTotalQty = 0;
+
+          [
+            { key: 'L3', groups: l3BRGroups.value },
+            { key: 'L4', groups: l4BRGroups.value },
+            { key: 'L5', groups: l5BRGroups.value }
+          ].forEach(st => {
+            st.groups.forEach(g => {
+              totalBRCount++;
+              const fvcList = g.recipes.map(r => ({
+                fvcCode: r.fvcCode,
+                qty: r.totalQty,
+                items: r.items
+              }));
+              totalRecipeCount += fvcList.length;
+              grandTotalQty += g.totalQty;
+
+              rows.push({
+                station: st.key,
+                cmfSlot: g.cmfSlot,
+                brNum: g.brNum,
+                fvcCount: fvcList.length,
+                fvcList,
+                totalQty: g.totalQty
+              });
+            });
+          });
+
+          return { rows, totalBRCount, totalRecipeCount, grandTotalQty };
+        });
+
+        const getStationBRGroups = (st) => {
+          if (st === 'L3') return l3BRGroups.value;
+          if (st === 'L4') return l4BRGroups.value;
+          if (st === 'L5') return l5BRGroups.value;
+          if (st === 'L10') return l10BRGroups.value;
+          return [];
+        };
+
+        const currentWorkbenchBRGroups = computed(() => getStationBRGroups(activeWorkbenchStation.value));
+
+        const filteredOverviewResults = computed(() => {
+          return brResults.value.filter(item => {
+            const matchStation = item.level === overviewStation.value;
+            const q = searchQuery.value.trim().toLowerCase();
+            const matchSearch = !q || 
+              item.pn.toLowerCase().includes(q) ||
+              item.descZh.toLowerCase().includes(q) ||
+              (item.supplier && item.supplier.toLowerCase().includes(q));
+            return matchStation && matchSearch;
+          });
+        });
+
+        const getStationItemCount = (st) => {
+          return bomItems.value.filter(i => i.level === st).length;
+        };
+
+        const getStationBaselines = (st) => {
+          const stItems = bomItems.value.filter(i => i.level === st);
+          if (!stItems.length) return [];
+
+          const baselines = [];
+
+          if (st === 'L3') {
+            const slotMap = new Map();
+            stItems.forEach(it => {
+              if (it.rfHole === 'RF') return;
+              const k = RULE_ENGINE.getSlotKey(it);
+              if (!slotMap.has(k)) slotMap.set(k, it);
+            });
+            if (slotMap.size > 0) {
+              baselines.push({
+                key: 'L3_Normal',
+                title: 'L3 前道背盖总成',
+                tag: 'Normal 标准',
+                tagClass: 'bg-blue-100 text-blue-800',
+                slotCount: slotMap.size,
+                rawItems: Array.from(slotMap.values())
+              });
+            }
+          }
+          else if (st === 'L4' || st === 'L5') {
+            const dynamicSlots = Array.from(new Set(
+              stItems.map(it => it.cmfSlot).filter(slot => slot > 0)
+            )).sort((a, b) => a - b);
+
+            const targetSlots = dynamicSlots.length ? dynamicSlots : Object.keys(detectedCmfMap.value).map(k => parseInt(k, 10));
+
+            targetSlots.forEach(cmf => {
+              const slotMap = new Map();
+              stItems.forEach(it => {
+                if (it.cmfSlot !== 0 && it.cmfSlot !== cmf) {
+                  if (!RULE_ENGINE.matchCmfRule(it.color, it.cmfSlot, cmf)) return;
+                }
+                const k = RULE_ENGINE.getSlotKey(it);
+                if (!slotMap.has(k)) slotMap.set(k, it);
+              });
+              if (slotMap.size > 0) {
+                const colorTitle = getCmfDisplayName(cmf);
+                baselines.push({
+                  key: `${st}_CMF_${cmf}`,
+                  title: `${st} [${colorTitle}] 总成`,
+                  tag: `CMF_${cmf}`,
+                  tagClass: 'bg-purple-100 text-purple-800',
+                  slotCount: slotMap.size,
+                  rawItems: Array.from(slotMap.values())
+                });
+              }
+            });
+          }
+          else if (st === 'L10') {
+            const regions = ['ROW', 'PRC', 'NA', 'JP'];
+            const rfTypes = ['Normal', 'RF Hole', 'BE Hole', 'RF+BE Hole'];
+
+            regions.forEach(reg => {
+              rfTypes.forEach(rf => {
+                const isRF = rf.includes('RF');
+                const isBE = rf.includes('BE');
+
+                const slotMap = new Map();
+                stItems.forEach(it => {
+                  const bomRF = (it.rfHole || '').toUpperCase();
+                  if (bomRF === 'RF' && !isRF) return;
+                  if (bomRF === 'RF_NA' && isRF) return;
+                  if (bomRF === 'BE' && !isBE) return;
+                  if (bomRF === 'BE_NA' && isBE) return;
+
+                  if (it.sku && it.sku !== '/' && it.sku !== '0' && !it.sku.toUpperCase().includes('ALL')) {
+                    if (reg && !it.sku.toUpperCase().includes(reg)) return;
+                  }
+
+                  const sKey = RULE_ENGINE.getSlotKey(it);
+                  if (!slotMap.has(sKey)) {
+                    slotMap.set(sKey, it);
+                  }
+                });
+
+                if (slotMap.size > 5) {
+                  let tagClass = 'bg-emerald-100 text-emerald-800';
+                  if (rf === 'RF Hole') tagClass = 'bg-amber-100 text-amber-800';
+                  else if (rf === 'BE Hole') tagClass = 'bg-rose-100 text-rose-800';
+                  else if (rf === 'RF+BE Hole') tagClass = 'bg-purple-100 text-purple-800';
+
+                  baselines.push({
+                    key: `L10_${reg}_${rf}`,
+                    title: `${reg} 整机总装`,
+                    tag: rf,
+                    tagClass,
+                    slotCount: slotMap.size,
+                    rawItems: Array.from(slotMap.values())
+                  });
+                }
+              });
+            });
+          }
+
+          return baselines;
+        };
+
+        const stationDiffCount = computed(() => {
+          let count = 0;
+          const bgList = getStationBRGroups(activeWorkbenchStation.value);
+          bgList.forEach(bg => {
+            bg.recipes.forEach(r => {
+              if (r.diffInfo && !r.diffInfo.isPass) count++;
+            });
+          });
+          return count;
+        });
+
+        const globalDiffCount = computed(() => {
+          let count = 0;
+          ['L3', 'L4', 'L5', 'L10'].forEach(st => {
+            getStationBRGroups(st).forEach(bg => {
+              bg.recipes.forEach(r => {
+                if (r.diffInfo && !r.diffInfo.isPass) count++;
+              });
+            });
+          });
+          return count;
+        });
+
+        const exportStationSingleBR = (station, brGroup) => {
+          const wb = XLSX.utils.book_new();
+          brGroup.recipes.forEach((rec, idx) => {
+            const headers = ['Part Number', 'Part Description', 'Part Revision', 'Quantity', 'Vendor'];
+            let targetList = rec.items;
+            if (exportOnlyPositive.value) {
+              targetList = targetList.filter(item => Number(item.qty) > 0);
+            }
+            const rows = targetList.map(it => [it.pn, it.desc, it.rev, it.qty, it.vendor]);
+            const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+            ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
+            XLSX.utils.book_append_sheet(wb, ws, `ME_Recipe_${idx + 1}`);
+          });
+          const fileName = `${station}_${brGroup.brNum}.xlsx`;
+          XLSX.writeFile(wb, fileName);
+        };
+
+        const exportCurrentStationAllBRs = () => {
+          const groups = currentWorkbenchBRGroups.value;
+          if (!groups.length) {
+            alert('当前工段暂无数据！');
+            return;
+          }
+          groups.forEach(g => exportStationSingleBR(g.station, g));
+        };
+
+        const openRecipeDrawer = (station, brNum, rIdx, rec) => {
+          activeRecipeData.value = {
+            title: `${station} [BR: ${brNum}] Recipe ${rIdx} (${rec.fvcCode})`,
+            items: rec.items
+          };
+          drawerVisible.value = true;
+        };
+
+        return {
+          bomFileName,
+          trackerFileName,
+          bomItems,
+          buildPlans,
+          detectedPhases,
+          currentPhase,
+          detectedCmfMap,
+          detectedCmfCount,
+          getCmfDisplayName,
+          viewMode,
+          overviewStation,
+          searchQuery,
+          mainTab,
+          baselineStation,
+          activeWorkbenchStation,
+          bomDragOver,
+          trackerDragOver,
+          handleBOMUpload,
+          handleBOMDrop,
+          handleTrackerUpload,
+          handleTrackerDrop,
+          filteredOverviewResults,
+          getStationItemCount,
+          frontStationsSummary,
+          getStationBaselines,
+          stationDiffCount,
+          globalDiffCount,
+          getStationBRGroups,
+          currentWorkbenchBRGroups,
+          exportStationSingleBR,
+          exportCurrentStationAllBRs,
+          openRecipeDrawer,
+          drawerVisible,
+          activeRecipeData,
+          getRecipeKeyTags,
+          getBRUniquePNCount,
+          openEditDialog,
+          saveEditDialog,
+          editDialogVisible,
+          editDialogValue,
+          editDialogTarget,
+          dialogInputRef,
+          totalBuildQty: computed(() => buildPlans.value.reduce((acc, p) => acc + (p.qty || 0), 0)),
+          totalBRCountAll: computed(() => ['L3', 'L4', 'L5', 'L10'].reduce((acc, s) => acc + getStationBRGroups(s).length, 0)),
+          totalRecipeCountAll: computed(() => ['L3', 'L4', 'L5', 'L10'].reduce((acc, s) => acc + getStationBRGroups(s).reduce((a, b) => a + b.recipes.length, 0), 0)),
+          exportOnlyPositive,
+          fixedSlotPanel,
+          fixedSlotSearch,
+          openFixedSlotPanel,
+          filteredFixedSlotItems,
+          subPcbItemsL10,
+          hasConfiguredSubPcb,
+          subPcbModalVisible,
+          tempSubPcbRevs,
+          openSubPcbModal,
+          saveSubPcbRevs
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
