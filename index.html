@@ -974,11 +974,12 @@
         return false;
       },
 
+      // 🌟 优化：支持回车换行符 \n 作为合法的多颜色分隔符
       matchCmfRule(bomColorStr, bomCmfSlot, planCmfSlot) {
         if (!planCmfSlot || planCmfSlot === 0) return true;
         if (!bomCmfSlot || bomCmfSlot === 0) return true;
         const s = String(bomColorStr || '').trim().toUpperCase();
-        if (s.includes('/') || s.includes('、') || s.includes(',') || s.includes(';') || s.includes('&')) {
+        if (s.includes('/') || s.includes('、') || s.includes(',') || s.includes(';') || s.includes('&') || s.includes('\n')) {
           let slots = [];
           const matches = s.matchAll(/CMF[_\s-]?(\d+)/g);
           for (const m of matches) slots.push(parseInt(m[1], 10));
@@ -991,18 +992,12 @@
         return bomCmfSlot === planCmfSlot;
       },
 
+      // 🌟 核心优化：物理槽位纯粹由【功能与中文/英文描述】决定，彻底删除强制拼接料号后缀 _${item.pn}
       getSlotKey(item) {
         if (!item) return 'SLOT_UNKNOWN';
         const descZh = (item.descZh || '').trim();
         const descEn = (item.descEn || '').trim();
         const mainDesc = (descZh || descEn || item.pn).toUpperCase();
-
-        const cat = (item.category || '').toLowerCase().trim();
-        const isAccessory = cat === '辅料' || cat === 'screw' || cat === '螺丝' || cat === '隔磁片' || this.isAccessoryKeyword(descZh, descEn);
-
-        if (isAccessory) {
-          return `SLOT_ACC_${mainDesc}_${item.pn}`;
-        }
         return `SLOT_${mainDesc}`;
       },
 
@@ -1022,7 +1017,7 @@
         const fullDesc = `${descZh} ${descEn}`.toUpperCase();
         const category = (bom.category || '').toLowerCase().trim();
 
-        // 🌟 动态查 BOM 规则 1：仅当 BOM 表中该工段确实有零件定义了 RF/BE 特征时，才进行排产表 RF/BE 过滤
+        // 动态查 BOM 规则 1：仅当 BOM 表中该工段确实有零件定义了 RF/BE 特征时，才进行排产表 RF/BE 过滤
         const { stationsWithRF, stationsWithSKU } = dynamicContext;
         if (stationsWithRF && stationsWithRF.has(bom.level)) {
           const planRFUpper = (plan.rfHole || '').toUpperCase();
@@ -1047,11 +1042,26 @@
           if (bomSim.includes('SS') && !planSim.includes('SS')) return false;
         }
 
-        // 🌟 动态查 BOM 规则 2：仅当 BOM 表中该工段确实有零件定义了 SKU 区域限定时，才校验排产表的 region
+        // 🌟 动态查 BOM 规则 2：智能区分 SKU 列是“市场区域”还是“内存存储规格”
         if (stationsWithSKU && stationsWithSKU.has(bom.level)) {
           if (bom.sku && bom.sku !== '/' && bom.sku !== '0' && !bom.sku.toUpperCase().includes('ALL')) {
             const skuUpper = bom.sku.toUpperCase();
-            if (plan.region && !skuUpper.includes(plan.region.toUpperCase())) {
+
+            // 识别是否包含内存规格（如 8+256, 12+512/12+256）
+            if (/(\d+\s*[\+_]\s*\d+)/.test(skuUpper)) {
+              if (plan.memory) {
+                const normPlanMem = plan.memory.replace(/\s+/g, '');
+                const memTokens = skuUpper.split(/[\/,;]/).map(t => {
+                  const m = t.match(/(\d+\s*[\+_]\s*\d+)/);
+                  return m ? m[1].replace(/[\s_]+/g, '+') : '';
+                }).filter(Boolean);
+                if (memTokens.length && !memTokens.includes(normPlanMem)) {
+                  return false;
+                }
+              }
+            } 
+            // 纯市场国家校验（如 JP, ROW, PRC, NA）
+            else if (plan.region && !skuUpper.includes(plan.region.toUpperCase())) {
               return false;
             }
           }
@@ -1211,7 +1221,7 @@
         const dialogInputRef = ref(null);
 
         // 🌟 在线维护小板硬件版本的独立状态与弹窗控制
-        const customSubPcbRevMap = ref({}); // { PN -> revision }
+        const customSubPcbRevMap = ref({});
         const subPcbModalVisible = ref(false);
         const tempSubPcbRevs = ref({});
 
@@ -1330,11 +1340,15 @@
           editDialogVisible.value = false;
         };
 
+        // 🌟 优化：优先精确查找正式填报表 ME_BOM
         const findMainBOMSheet = (workbook) => {
           if (!workbook || !workbook.SheetNames || !workbook.SheetNames.length) {
             throw new Error('未在 Excel 文件中检出任何工作表！');
           }
           if (workbook.SheetNames.length === 1) return workbook.SheetNames[0];
+
+          const meBomName = workbook.SheetNames.find(n => n.trim().toUpperCase() === 'ME_BOM');
+          if (meBomName && workbook.Sheets[meBomName]) return meBomName;
 
           const bomName = workbook.SheetNames.find(n => n.toUpperCase().includes('BOM'));
           if (bomName && workbook.Sheets[bomName]) return bomName;
@@ -1451,7 +1465,7 @@
             for (let r = headerIdx + 1; r < rows.length; r++) {
               const cVal = String(rows[r]?.[colColor] || '').trim();
               if (cVal && !['/', '0', 'NONE', 'ALL'].includes(cVal.toUpperCase())) {
-                const m = cVal.match(/CMF[_\s-]?(\d+)[:：\s]*([^\s/,;、&]+)?/i);
+                const m = cVal.match(/CMF[_\s-]?(\d+)[:：\s]*([^\s/,;、&\n]+)?/i);
                 if (m) {
                   const sNum = parseInt(m[1], 10);
                   const sName = (m[2] || '').trim();
@@ -1588,7 +1602,6 @@
 
         const getItemREV = (bom) => {
           if (!bom) return '';
-          // 🌟 检查是否有用户在线维护的小板版本覆盖
           if (customSubPcbRevMap.value[bom.pn]) {
             return customSubPcbRevMap.value[bom.pn];
           }
@@ -1658,9 +1671,7 @@
                 if (m) {
                   const sNum = parseInt(m[1], 10);
                   const sName = (m[2] || '').trim();
-                  if (sName && (!localCmfMap[sNum] || sName.length > localCmfMap[sNum].length)) {
-                    localCmfMap[sNum] = sName;
-                  }
+                  if (!localCmfMap[sNum] && sName) localCmfMap[sNum] = sName;
                 }
               }
             }
@@ -1861,9 +1872,20 @@
               if (bomRF === 'BE_NA' && isPlanBE) return;
             }
 
+            // 🌟 差异核验同步支持内存型 SKU 判定
             if (stationsWithSKU.value.has(it.level)) {
               if (it.sku && it.sku !== '/' && it.sku !== '0' && !it.sku.toUpperCase().includes('ALL')) {
-                if (plan.region && !it.sku.toUpperCase().includes(plan.region.toUpperCase())) return;
+                const skuUpper = it.sku.toUpperCase();
+                if (/(\d+\s*[\+_]\s*\d+)/.test(skuUpper)) {
+                  if (plan.memory) {
+                    const normPlanMem = plan.memory.replace(/\s+/g, '');
+                    const memTokens = skuUpper.split(/[\/,;]/).map(t => {
+                      const m = t.match(/(\d+\s*[\+_]\s*\d+)/);
+                      return m ? m[1].replace(/[\s_]+/g, '+') : '';
+                    }).filter(Boolean);
+                    if (memTokens.length && !memTokens.includes(normPlanMem)) return;
+                  }
+                } else if (plan.region && !skuUpper.includes(plan.region.toUpperCase())) return;
               }
             }
 
@@ -1920,7 +1942,7 @@
           const stItems = bomItems.value.filter(i => i.level === station);
           if (!stItems.length || !buildPlans.value.length) return { brGroups: [], planFVCLookup: {} };
 
-          // 🌟 核心原则保持：L3 工段绝不排入 RF 打孔样机批次（打孔样机走独立物料，不投 L3 正常总成）
+          // 核心原则保持：L3 工段绝不排入 RF 打孔样机批次（打孔样机走独立物料，不投 L3 正常总成）
           const eligiblePlans = station === 'L3'
             ? buildPlans.value.filter(p => !p.rfHole.toUpperCase().includes('RF'))
             : buildPlans.value;
@@ -1968,7 +1990,7 @@
                 };
               });
 
-              // 🌟 FVC 聚类指纹纯粹基于 [PN + Vendor + Rev + Qty]
+              // FVC 聚类指纹纯粹基于 [PN + Vendor + Rev + Qty]
               const signature = activeItems.map(it => `${it.pn}_${it.vendor}_${it.rev}_${it.qty}`).sort().join('||');
 
               if (!clusterMap[signature]) {
@@ -2050,7 +2072,6 @@
             }
 
             const matchedItems = l10Items.filter(b => RULE_ENGINE.matchBaseRule(b, plan, dynamicBOMContext.value)).map(b => {
-              // 🌟 自动优先读取在线维护的小板版本
               let dynamicRev = getItemREV(b);
               if (b.isSubAssembly) {
                 if (b.descZh.includes('L3') || b.descEn.includes('L3_') || b.descZh.includes('CLI')) {
@@ -2267,8 +2288,12 @@
                   if (bomRF === 'BE' && !isBE) return;
                   if (bomRF === 'BE_NA' && isBE) return;
 
+                  // 🌟 理论清单：对内存型 SKU 不按国家剔除，作为合规定额纳入
                   if (it.sku && it.sku !== '/' && it.sku !== '0' && !it.sku.toUpperCase().includes('ALL')) {
-                    if (reg && !it.sku.toUpperCase().includes(reg)) return;
+                    const skuUpper = it.sku.toUpperCase();
+                    if (!/(\d+\s*[\+_]\s*\d+)/.test(skuUpper)) {
+                      if (reg && !skuUpper.includes(reg)) return;
+                    }
                   }
 
                   const sKey = RULE_ENGINE.getSlotKey(it);
