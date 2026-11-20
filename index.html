@@ -18,10 +18,17 @@
 <body class="bg-slate-50 text-slate-800">
   <div id="app" class="min-h-screen flex flex-col relative">
     
-    <!-- 顶部导航 (纯粹文字，无图标，无标语) -->
+    <!-- 顶部导航 -->
     <header class="bg-indigo-700 text-white shadow-xs sticky top-0 z-30">
       <div class="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between">
-        <h1 class="text-base font-black tracking-wider font-mono">BOM TO BR</h1>
+        <div class="flex items-center space-x-3">
+          <h1 class="text-base font-black tracking-wider font-mono">BOM TO BR</h1>
+          <button 
+            @click="downloadBOMTemplate"
+            class="text-xs bg-indigo-800/90 hover:bg-indigo-900 text-indigo-100 hover:text-white px-2.5 py-1 rounded-md border border-indigo-500 transition shadow-2xs flex items-center">
+            📥 下载 BOM 模板
+          </button>
+        </div>
 
         <div class="flex items-center space-x-2">
           <div class="flex items-center" v-if="bomItems.length > 0">
@@ -38,17 +45,24 @@
     <main class="max-w-7xl mx-auto px-4 py-3 flex-1 w-full space-y-3">
       
       <!-- ========================================================================= -->
-      <!-- 模块 1：双态上传栏 (去副标题，纯净极简) -->
+      <!-- 模块 1：双态上传栏 -->
       <!-- ========================================================================= -->
       <div>
-        <!-- 未上传双卡片 (无副标题) -->
+        <!-- 未上传双卡片 -->
         <div v-if="!bomItems.length || !buildPlans.length" class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- BOM 上传框 -->
           <div v-if="!bomItems.length" class="bg-white border rounded-xl p-5 shadow-xs border-indigo-100">
-            <h2 class="text-sm font-bold text-slate-800 flex items-center mb-3">
-              <span class="w-2.5 h-2.5 rounded-full bg-indigo-600 mr-2"></span>
-              1. ME 工程 BOM
-            </h2>
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-sm font-bold text-slate-800 flex items-center">
+                <span class="w-2.5 h-2.5 rounded-full bg-indigo-600 mr-2"></span>
+                1. ME 工程 BOM
+              </h2>
+              <button 
+                @click.stop="downloadBOMTemplate" 
+                class="inline-flex items-center text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-md border border-indigo-200 transition shadow-2xs">
+                📥 下载标准模板 (.xlsx)
+              </button>
+            </div>
             <label 
               @dragover.prevent="bomDragOver = true"
               @dragleave.prevent="bomDragOver = false"
@@ -362,7 +376,7 @@
       </div>
 
       <!-- ========================================================================= -->
-      <!-- 【PAGE 2】：理论发料清单 (全工段覆盖 + 动态颜色卡片，去底部辅助说明) -->
+      <!-- 【PAGE 2】：理论发料清单 (全工段覆盖 + 动态颜色卡片) -->
       <!-- ========================================================================= -->
       <div v-if="bomItems.length && mainTab === 'baseline'" class="space-y-4">
         
@@ -419,7 +433,7 @@
       </div>
 
       <!-- ========================================================================= -->
-      <!-- 【PAGE 3】：实际发料清单 (专职发料与差异核验，带小板版本在线维护) -->
+      <!-- 【PAGE 3】：实际发料清单 (专职发料与差异核验) -->
       <!-- ========================================================================= -->
       <div v-if="bomItems.length && mainTab === 'workbench'" class="space-y-4">
         <div v-if="!buildPlans.length" class="text-center py-12 border-2 border-dashed rounded-xl bg-white space-y-2">
@@ -429,7 +443,7 @@
         </div>
 
         <div v-else class="space-y-4">
-          <!-- 二级工段切换 Tab 与 批量导出栏（常驻当前工段健康度状态与小板维护按钮） -->
+          <!-- 二级工段切换 Tab 与 批量导出栏 -->
           <div class="bg-white border rounded-xl p-2.5 shadow-xs flex flex-wrap items-center justify-between gap-3">
             <div class="flex items-center space-x-2">
               <div class="flex items-center space-x-1">
@@ -459,7 +473,7 @@
               </div>
             </div>
 
-            <!-- 操作按钮组：支持 L10 在线维护小板版本 + 批量导出 -->
+            <!-- 操作按钮组 -->
             <div class="flex items-center space-x-2">
               <button 
                 v-if="activeWorkbenchStation === 'L10' && subPcbItemsL10.length > 0"
@@ -637,7 +651,7 @@
         </div>
       </div>
 
-      <!-- 空白引导占位 (纯净极简，无多余副标题) -->
+      <!-- 空白引导占位 -->
       <div v-if="!bomItems.length" class="text-center py-16 border-2 border-dashed rounded-xl bg-white">
         <div class="text-4xl mb-3">📂</div>
         <h3 class="text-base font-semibold text-slate-700">请上传 ME BOM 工程文件 (.xlsx)</h3>
@@ -645,7 +659,7 @@
     </main>
 
     <!-- ========================================================================= -->
-    <!-- 🌟 专职弹窗：L10 小板硬件版本按 SKU 独立维护窗口 (免去重复修改上传 BOM) -->
+    <!-- 🌟 专职弹窗：L10 小板硬件版本按 SKU 独立维护窗口 -->
     <!-- ========================================================================= -->
     <div 
       v-if="subPcbModalVisible"
@@ -1220,7 +1234,7 @@
         const editDialogTarget = ref({ type: 'BR', station: '', key: '', prompt: '' });
         const dialogInputRef = ref(null);
 
-        // 🌟 在线维护小板硬件版本的独立状态与弹窗控制
+        // 在线维护小板硬件版本的独立状态与弹窗控制
         const customSubPcbRevMap = ref({});
         const subPcbModalVisible = ref(false);
         const tempSubPcbRevs = ref({});
@@ -1233,7 +1247,7 @@
         const fixedSlotPanel = ref({ visible: false, title: '', items: [] });
         const fixedSlotSearch = ref('');
 
-        // 🌟 动态嗅探 BOM 各工段是否真正定义了 RF/BE 与 SKU 特征集合
+        // 动态嗅探 BOM 各工段是否真正定义了 RF/BE 与 SKU 特征集合
         const stationsWithRF = computed(() => {
           const set = new Set();
           bomItems.value.forEach(it => {
@@ -1260,6 +1274,80 @@
           stationsWithRF: stationsWithRF.value,
           stationsWithSKU: stationsWithSKU.value
         }));
+
+        // 🌟 新增：零依赖本地动态生成 3-Sheet 标准 Excel 模板
+        const downloadBOMTemplate = () => {
+          const wb = XLSX.utils.book_new();
+
+          // 1. 填报指南_Readme 页
+          const readmeRows = [
+            ["NPI 工程结构发料系统 ── ME BOM 导入标准规范指南"],
+            [],
+            ["一、 本工作簿结构与系统自动识别原则"],
+            ["工作表 1：【填报指南_Readme】", "本说明页，供填报人员快速查阅字段定义、填写要求与正误范例（系统不解析本页）。"],
+            ["工作表 2：【Template】", "权威参考标杆，保留完整的真实工程 BOM（Raptor 项目全工段标准样例），可随时对照格式。"],
+            ["工作表 3：【ME_BOM】", "【唯一正式数据源】仅保留冻结的 23 列标准表头。请将新项目物料按规范粘贴在此表，直接上传系统。"],
+            ["⚠️ 核心安全提示", "表头第 1 行严禁插入新列、严禁删除列、严禁更改列名顺序！字段列名已全局固化。"],
+            [],
+            ["二、 核心关键列【填写规范与正误对照表】（必须严格遵守）"],
+            ["列名", "表头文字", "必填属性", "正确填法示例（系统识别 ✅）", "错误填法示例（导致异常 ❌）", "系统运算逻辑与解释说明"],
+            ["Level", "Level", "核心必填", "L3、L4、L5、L10（或 L4组件）", "背盖、中框、整机、总装", "系统严格按工段独立聚类与分流，必须带英文 L+数字"],
+            ["PN", "PN", "核心必填", "SB68F34058、SM88E08781", "(纯空格)、无、待定", "真实零件必须有唯一物料号；自制总成未申请料号前可留空"],
+            ["COLOR", "COLOR", "分色核心", "CMF_1：雅灰、CMF_2：狮棕、(通用留空)", "黑色、灰色、Everwin、通用", "系统依靠 CMF_数字正则提取槽位，分色件必须包含数字"],
+            ["QTY", "QTY", "用量核心", "1、2、6、12、0.5", "1个、2pcs、6颗、TBD、--", "必须为纯数值，严禁带有单位汉字，否则无法参与乘法汇总"],
+            ["供方级别", "Supplier 1/2", "匹配置顶", "1（一供）、2（二供）、(独供留空)", "一供、二供、主供、备供", "必须为半角阿拉伯数字 1 或 2，用于匹配排产表 Source 等级"],
+            ["SKU 区域", "SKU", "按需填写", "通用件全留空；专用件填 JP、ROW/PRC/NA", "通用结构件盲目填写 JP 或 ROW", "通用件留空即可跨区域自动合并；物理专用件才填对应市场"],
+            ["开孔特性", "RF hole", "状态机枚举", "RF（打孔）、RF_NA（真机）、BE（假电）", "打孔、开孔机、真机专用、假电池", "系统严格状态机匹配，仅支持标准枚举值，常规件直接留空"],
+            ["单双卡", "SIM (SS / DS)", "状态机枚举", "DS（双卡）、SS（单卡）、(通用留空)", "双卡、单卡、两张卡", "仅卡托等关联零件填写标准英文缩写，其余常规件留空"],
+            ["试产版本", "DVT1 / 阶段", "版本依据", "V2、V2A、V2A-1040：大货、A、MP", "第二版、最新版、已改模", "必须以标准版本代号开头，系统自动抓取首个代号作为签名"],
+            [],
+            ["三、 手机结构工程师（ME）日常维护 5 大避坑守则"],
+            ["1. 废弃料处理（工程追溯）", "【留 Comment 记历史，清 PN 和 Level 防误发】当物料废弃/DEL时，严禁整行删除；必须在 comment 列写明变更履历（如“10.15 del 挪到壳厂”），并务必将该行的 PN 和 Level 彻底清空！"],
+            ["2. 单层发料原则（总成与单体）", "若已采购或领用上级大总成（如中框总成带磁铁/毛刷），包含在内的二级单体零件行 Level 必须留空，严禁兼报，防止车间重复发料。"],
+            ["3. 强绑定 CP 件明确注明", "凡属公差配合或同源供方搭配件（如上下中框同供方、转轴与中板同供方），请在 comment 明确注明（如“上下中框供应商匹配”）。"],
+            ["4. 耗材胶水单台数值化", "UV胶、点胶等消耗性辅料必须换算为单台纯数字用量（如 0.02），严禁填写“1支”、“1瓶”、“适量”等汉字包装单位。"],
+            ["5. 移站变更双向闭环", "零件工位前移或后移（如 L4 挪至 L10）时，新工段新增物料的同时，原旧工段必须清空 Level，杜绝跨工段重复发料的幽灵残影。"],
+            [],
+            ["四、 工程师三步极速操作流程"],
+            ["第 1 步：查阅标准范例", "点击下方【Template】标签页，参考成熟项目的物料归类、工段分配（L3/L4/L5/L10）与 CMF 颜色写法。"],
+            ["第 2 步：填报新项目数据", "切换至【ME_BOM】标签页，保持第 1 行表头完全不动，从第 2 行开始逐行粘贴新项目的物料清单数据。"],
+            ["第 3 步：上传工具网页", "直接将保存好的 Excel 文件拖拽至网页端上传框，系统将自动锁定【ME_BOM】页并极速生成各工段发料清单！"]
+          ];
+          const wsReadme = XLSX.utils.aoa_to_sheet(readmeRows);
+          wsReadme['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 32 }, { wch: 28 }, { wch: 38 }];
+          XLSX.utils.book_append_sheet(wb, wsReadme, "填报指南_Readme");
+
+          // 2. Template 页 (精选典型结构参考行)
+          const templateHeaders = ["comment","PN","reuse/unique","Level","类别","中文描述","0","英文描述","二级物料","COLOR","SKU","QTY","一供","二供","三供","MEP","Supplier 1/2","SIM (SS / DS)","RF hole","EVT REV.","DVT1","DVT2","PVT"];
+          const sampleRows = [
+            templateHeaders,
+            ["试产 带安全码", "SD68F29745", "", "L3", "major", "CLI 试产用", "", "assy_cli_unit_raptor_v3", "", "", "", 1, "TM", "", "", "", "1", "", "", "V1A", "V2A", "V3A", "V4A"],
+            ["", "SMO8F35200", "", "L3", "五金件", "50M wide Deco", "", "50M_WIDE_CAM_DECO_RAPTOR", "", "", "", 1, "everwin", "", "", "3.1.26.1286", "1", "", "", "V1", "V2", "V3", "A"],
+            ["", "SB68F34058", "", "L4", "major", "音量键", "", "Elegance_VOL_KEY_RAPTOR", "", "CMF_1：雅灰", "", 2, "everwin", "", "", "3.1.26.1277", "1", "", "", "V1", "V2", "V3", "A"],
+            ["上下中框供应商匹配", "SS58F33716", "", "L4", "major", "上中框+辅料", "", "Elegance_HSG_FLIP_RAPTOR_V3", "", "CMF_1：雅灰", "", 1, "BYD", "", "", "20883144-00", "1", "", "", "V1", "V2", "V3", "V4"],
+            ["上下中框供应商匹配", "SS58F33745", "", "L4", "major", "上中框+辅料", "", "Elegance_HSG_FLIP_RAPTOR_V3", "", "CMF_1：雅灰", "", 1, "", "GREEN", "", "C4242031038A000", "2", "", "", "V1B", "V2B", "V3B", "V4C"],
+            ["跟中板配同一家供应商", "SSR8E97372", "reuse", "L4", "major", "4.5转轴", "", "ASSY_HINGE_CERES_OPEN", "", "", "", 1, "HUANLI", "", "", "", "1", "", "", "A", "A", "A", "A"],
+            ["", "SD68F35116", "", "L5", "组件", "L4组件", "", "L4_Elegance_HSG_FLIP_RPT", "", "CMF_1：雅灰", "", 1, "WUHAN", "", "", "", "", "", "", "", "BR", "BR", "BR"],
+            ["", "SD68F32960", "", "L5", "KP", "主屏", "", "ASSY_DISPLAY_RAPTOR_V3", "", "", "", 1, "CSOT", "", "", "WM6900Z52-4", "1", "", "", "V1A", "V2A", "V3A", "V4A"],
+            ["", "SD68F35120", "", "L10", "组件", "L5组件", "", "L5_Elegance_HSG_FLIP_RPT", "", "CMF_1：雅灰", "", 1, "WUHAN", "", "", "", "", "", "", "", "BR", "BR", "BR"],
+            ["", "SD18F33577", "", "L10", "", "CLI （打孔）", "", "CLI_RF_HOLE_RPT", "", "", "", 1, "伯恩", "", "", "", "", "", "RF", "", "BR", "BR", "BR"],
+            ["", "SD78E13577", "reuse", "L10", "辅料", "memory铜块", "", "COPPER_BLOCK_120_GLR", "", "", "8+256", 1, "Bromake", "", "", "61042-0017A", "", "", "", "", "all", "ALL", ""],
+            ["", "SD78E22253", "reuse", "L10", "辅料", "memory铜块", "", "COPPER_BLOCK_12_512_GLR", "", "", "12+512/12+256", 1, "Bromake", "", "", "61042-0092A", "", "", "", "", "all", "ALL", ""],
+            ["", "SD78E13586", "reuse", "L10", "辅料", "下inlay 背胶", "", "ASSY_PSA_BASE_HSG_INLAY_GLR", "", "CMF_1:Gibraltar Sea/CMF_2:Spring Bud", "", 1, "Bromake", "", "", "", "", "", "", "", "", "", ""],
+            ["", "SD78E56080", "reuse", "L10", "辅料", "下inlay 背胶", "", "DCM_PSA_BASE_HSG_INLAY_GLR", "", "CMF_3:Lightest Sky", "", 1, "Bromake", "", "", "61042-0127A", "", "", "", "", "all", "ALL", ""]
+          ];
+          const wsTemplate = XLSX.utils.aoa_to_sheet(sampleRows);
+          wsTemplate['!cols'] = templateHeaders.map(h => ({ wch: Math.max(h.length * 2, 12) }));
+          XLSX.utils.book_append_sheet(wb, wsTemplate, "Template");
+
+          // 3. ME_BOM 页 (固化 23 列表头，下方全空)
+          const wsMeBom = XLSX.utils.aoa_to_sheet([templateHeaders]);
+          wsMeBom['!cols'] = templateHeaders.map(h => ({ wch: Math.max(h.length * 2, 12) }));
+          XLSX.utils.book_append_sheet(wb, wsMeBom, "ME_BOM");
+
+          // 执行下载
+          XLSX.writeFile(wb, "ME_BOM_Standard_Template.xlsx");
+        };
 
         const openFixedSlotPanel = (title, list) => {
           fixedSlotSearch.value = '';
@@ -1289,7 +1377,6 @@
 
         const detectedCmfCount = computed(() => Object.keys(detectedCmfMap.value).length || 3);
 
-        // 🌟 动态检索当前 BOM 中属于 L10 小板的所有料号集合
         const subPcbItemsL10 = computed(() => {
           return bomItems.value.filter(i => 
             i.level === 'L10' && 
@@ -1872,7 +1959,7 @@
               if (bomRF === 'BE_NA' && isPlanBE) return;
             }
 
-            // 🌟 差异核验同步支持内存型 SKU 判定
+            // 差异核验同步支持内存型 SKU 判定
             if (stationsWithSKU.value.has(it.level)) {
               if (it.sku && it.sku !== '/' && it.sku !== '0' && !it.sku.toUpperCase().includes('ALL')) {
                 const skuUpper = it.sku.toUpperCase();
@@ -2288,7 +2375,7 @@
                   if (bomRF === 'BE' && !isBE) return;
                   if (bomRF === 'BE_NA' && isBE) return;
 
-                  // 🌟 理论清单：对内存型 SKU 不按国家剔除，作为合规定额纳入
+                  // 理论清单：对内存型 SKU 不按国家剔除，作为合规定额纳入
                   if (it.sku && it.sku !== '/' && it.sku !== '0' && !it.sku.toUpperCase().includes('ALL')) {
                     const skuUpper = it.sku.toUpperCase();
                     if (!/(\d+\s*[\+_]\s*\d+)/.test(skuUpper)) {
@@ -2437,7 +2524,8 @@
           subPcbModalVisible,
           tempSubPcbRevs,
           openSubPcbModal,
-          saveSubPcbRevs
+          saveSubPcbRevs,
+          downloadBOMTemplate
         };
       }
     }).mount('#app');
