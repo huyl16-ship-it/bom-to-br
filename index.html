@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BOM TO BR</title>
   <!-- 高可用 Tailwind CSS -->
@@ -993,8 +994,7 @@
         if (!planCmfSlot || planCmfSlot === 0) return true;
         if (!bomCmfSlot || bomCmfSlot === 0) return true;
         const s = String(bomColorStr || '').trim().toUpperCase();
-        if (s.includes('/') || s.includes('、') || s.includes(',') || s.includes(';') || s.includes('&') || s.includes('
-')) {
+        if (s.includes('/') || s.includes('、') || s.includes(',') || s.includes(';') || s.includes('&') || s.includes('\n')) {
           let slots = [];
           const matches = s.matchAll(/CMF[_\s-]?(\d+)/g);
           for (const m of matches) slots.push(parseInt(m[1], 10));
@@ -1431,9 +1431,7 @@
             const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
             executeBOMDataParse(rows);
           } catch (err) {
-            alert(`❌ BOM 文件解析失败:
-原因: ${err.message}
-请检查控制台 (F12) 查看详细信息。`);
+            alert(`❌ BOM 文件解析失败:\n原因: ${err.message}\n请检查控制台 (F12) 查看详细信息。`);
             console.error('BOM 解析完整报错:', err);
           }
         };
@@ -1702,9 +1700,7 @@
               const colorRow = rows[rowMapping.rColor] || [];
               for (let c = 0; c < colorRow.length; c++) {
                 const cellStr = String(colorRow[c] || '').trim();
-                const m = cellStr.match(/(\d+)\s*CMF\s*[
-]?([^
-]+)?/i);
+                const m = cellStr.match(/(\d+)\s*CMF\s*[\r\n]?([^\r\n]+)?/i);
                 if (m) {
                   const sNum = parseInt(m[1], 10);
                   const sName = (m[2] || '').trim();
