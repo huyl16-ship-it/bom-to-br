@@ -1149,6 +1149,18 @@
         if (category === 'major' || category === 'kp') {
           if (plan.suppliers) {
             if (descZh.includes('CLI') || (fullDesc.includes('ASSY_CLI') && !fullDesc.includes('FOAM') && !fullDesc.includes('GRAPHITE'))) {
+              // 1. 安全码专属隔离规则：仅当 BOM 的 comment 明确标明安全码属性时进行试产/量产互斥
+              const bomComment = (bom.comment || '').trim();
+              const planMarking = (plan.displayMarking || '').toUpperCase().trim();
+              const isPlanSecurity = planMarking.includes('SECURITY') && !planMarking.includes('NON-SECURITY');
+
+              if (bomComment.includes('无安全码') || bomComment.includes('不带安全码')) {
+                if (isPlanSecurity) return false; // 排产指定带安全码，排除量产无码屏
+              } else if (bomComment.includes('安全码') || bomComment.includes('带安全码')) {
+                if (!isPlanSecurity) return false; // 排产指定无安全码，排除试产有码屏
+              }
+
+              // 2. 原供方匹配逻辑（100%保持不变）
               return this.checkSupplierOrSourceTier(bom, plan.suppliers.cli, plan);
             }
             if (descZh.includes('主屏') || (fullDesc.includes('ASSY_DISPLAY') && !fullDesc.includes('CLI'))) {
