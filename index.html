@@ -139,6 +139,67 @@
         </div>
       </div>
 
+      
+      <!-- ========================================================================= -->
+      <!-- 🌟 专职诊断中心：排产表与 BOM 录入冲突警示卡片（纯只读提示，平时 100% 隐藏） -->
+      <!-- ========================================================================= -->
+      <div 
+        v-if="inputConflicts.length > 0" 
+        class="bg-amber-50/90 border-2 border-amber-400/80 rounded-xl p-3.5 shadow-sm transition-all duration-200 animate-in fade-in slide-in-from-top-2">
+        
+        <div class="flex items-center justify-between pb-2 border-b border-amber-200/80">
+          <div class="flex items-center space-x-2">
+            <span class="flex h-2.5 w-2.5 relative">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-600"></span>
+            </span>
+            <h3 class="text-xs font-black tracking-wide text-amber-900 flex items-center">
+              <span>⚠️ 输入源数据冲突诊断警示</span>
+              <span class="ml-2 bg-amber-200 text-amber-800 text-[10px] px-2 py-0.2 rounded-full font-mono">
+                检出 {{ inputConflicts.length }} 处填报冲突
+              </span>
+            </h3>
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <span class="text-[11px] font-medium text-amber-700/80 hidden sm:inline">
+              【说明：此为排产表与 BOM 录入数据脱节，非计算引擎故障】
+            </span>
+            <button 
+              @click="isConflictCardCollapsed = !isConflictCardCollapsed"
+              class="text-xs font-bold text-amber-800 hover:text-amber-900 bg-amber-200/70 hover:bg-amber-200 px-2 py-0.5 rounded transition">
+              {{ isConflictCardCollapsed ? '展开详情 ▼' : '收起 ▲' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 详细冲突列表 -->
+        <div v-show="!isConflictCardCollapsed" class="mt-2.5 space-y-2 max-h-56 overflow-y-auto custom-scroll pr-1 text-xs">
+          <div 
+            v-for="(cf, cIdx) in inputConflicts" 
+            :key="cIdx"
+            class="bg-white/90 border rounded-lg p-2.5 shadow-2xs space-y-1"
+            :class="{
+              'border-amber-300': cf.severity === 'warning',
+              'border-rose-300 bg-rose-50/50': cf.severity === 'danger' || cf.severity === 'error'
+            }">
+            
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center space-x-1.5 font-bold" :class="cf.severity === 'danger' ? 'text-rose-900' : 'text-amber-900'">
+                <span class="text-[10px] px-1.5 py-0.2 rounded font-mono uppercase" :class="cf.severity === 'danger' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'">
+                  {{ cf.type }}
+                </span>
+                <span class="text-xs leading-tight">{{ cf.title }}</span>
+              </div>
+            </div>
+
+            <p class="text-[11px] text-slate-600 font-sans pl-1 border-l-2" :class="cf.severity === 'danger' ? 'border-rose-400' : 'border-amber-400'">
+              {{ cf.solution }}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- ========================================================================= -->
       <!-- 2. 顶级三级 Tab 切换栏 -->
       <!-- ========================================================================= -->
@@ -1149,18 +1210,16 @@
         if (category === 'major' || category === 'kp') {
           if (plan.suppliers) {
             if (descZh.includes('CLI') || (fullDesc.includes('ASSY_CLI') && !fullDesc.includes('FOAM') && !fullDesc.includes('GRAPHITE'))) {
-              // 1. 安全码专属隔离规则：仅当 BOM 的 comment 明确标明安全码属性时进行试产/量产互斥
               const bomComment = (bom.comment || '').trim();
               const planMarking = (plan.displayMarking || '').toUpperCase().trim();
               const isPlanSecurity = planMarking.includes('SECURITY') && !planMarking.includes('NON-SECURITY');
 
               if (bomComment.includes('无安全码') || bomComment.includes('不带安全码')) {
-                if (isPlanSecurity) return false; // 排产指定带安全码，排除量产无码屏
+                if (isPlanSecurity) return false;
               } else if (bomComment.includes('安全码') || bomComment.includes('带安全码')) {
-                if (!isPlanSecurity) return false; // 排产指定无安全码，排除试产有码屏
+                if (!isPlanSecurity) return false;
               }
 
-              // 2. 原供方匹配逻辑（100%保持不变）
               return this.checkSupplierOrSourceTier(bom, plan.suppliers.cli, plan);
             }
             if (descZh.includes('主屏') || (fullDesc.includes('ASSY_DISPLAY') && !fullDesc.includes('CLI'))) {
@@ -1919,6 +1978,8 @@
             }
 
             return {
+          inputConflicts,
+          isConflictCardCollapsed,
               level: bom.level,
               category: bom.category,
               pn: bom.pn,
@@ -2465,6 +2526,75 @@
           };
           drawerVisible.value = true;
         };
+
+        
+        // =========================================================================
+        // 🌟 只读审计监视器：检测双表人工录入数据冲突（纯只读，绝不修改任何发料运算逻辑）
+        // =========================================================================
+        const isConflictCardCollapsed = ref(false);
+
+        const inputConflicts = computed(() => {
+          if (!bomItems.value.length || !buildPlans.value.length) return [];
+          const list = [];
+
+          // 1. 审计排产表指定的 Sub PCBA (小板) 与 BOM SKU 地区脱节
+          const l10Boms = bomItems.value.filter(i => i.level === 'L10');
+          const subPcbBoms = l10Boms.filter(i => (i.category || '').toLowerCase() === 'pcb' && (i.descZh || '').includes('小板'));
+          
+          buildPlans.value.forEach(plan => {
+            if (plan.subPcbaKit) {
+              const matchedBom = subPcbBoms.find(b => b.pn === plan.subPcbaKit);
+              if (matchedBom) {
+                if (matchedBom.sku && matchedBom.sku !== '/' && matchedBom.sku !== '0' && !matchedBom.sku.toUpperCase().includes('ALL')) {
+                  const skuUpper = matchedBom.sku.toUpperCase();
+                  if (plan.region && !skuUpper.includes(plan.region.toUpperCase())) {
+                    const msg = `批次 [${plan.fvc}] (${plan.region}) 指定的小板 [${plan.subPcbaKit}] 在 BOM 中限定适用区域为 [${matchedBom.sku}]，导致该批次无法正常匹配该小板！`;
+                    const solution = `👉 解决建议：请排产表维护人核实第 12 行 Sub PCBA 是否需更新为本区域专用料号，或由结构工程师在 BOM 中放开适用区域。`;
+                    if (!list.some(it => it.targetPN === plan.subPcbaKit && it.region === plan.region)) {
+                      list.push({ type: '小板区域冲突', title: msg, solution, targetPN: plan.subPcbaKit, region: plan.region, severity: 'warning' });
+                    }
+                  }
+                }
+              } else {
+                const msg = `排产表指定的 Sub PCBA [${plan.subPcbaKit}] 未在 BOM 的 L10 小板物料清单中检出！`;
+                const solution = `👉 解决建议：请核对排产表第 12 行料号是否打错，或确认该小板料号是否尚未维护入 BOM。`;
+                if (!list.some(it => it.targetPN === plan.subPcbaKit)) {
+                  list.push({ type: '小板料号不存在', title: msg, solution, targetPN: plan.subPcbaKit, severity: 'error' });
+                }
+              }
+            }
+
+            // 2. 审计排产表指定的 PCBA Kit (主板) 是否存在
+            if (plan.pcbaKit) {
+              const mainPcbBoms = l10Boms.filter(i => (i.category || '').toLowerCase() === 'pcb' && (i.descZh || '').includes('主板'));
+              const hasMain = mainPcbBoms.some(b => b.pn === plan.pcbaKit);
+              if (!hasMain) {
+                const msg = `排产表指定的主板 PCBA Kit [${plan.pcbaKit}] 未在 BOM 的主板物料中检出！`;
+                const solution = `👉 解决建议：请核查排产表第 10 行 PCBA Kit # 是否有误，或核对 BOM 中主板料号。`;
+                if (!list.some(it => it.targetPN === plan.pcbaKit)) {
+                  list.push({ type: '主板料号不存在', title: msg, solution, targetPN: plan.pcbaKit, severity: 'error' });
+                }
+              }
+            }
+
+            // 3. 审计试产前三阶段混入量产无码小屏
+            const curPh = (currentPhase.value || '').toUpperCase();
+            const isEarlyPhase = ['EVT', 'DVT', 'DVT1', 'DVT2', 'PROTO'].some(ph => curPh.includes(ph));
+            if (isEarlyPhase) {
+              const planMarking = (plan.displayMarking || '').toUpperCase().trim();
+              const isPlanSecurity = planMarking.includes('SECURITY') && !planMarking.includes('NON-SECURITY');
+              if (!isPlanSecurity) {
+                const msg = `当前处于前置试产阶段 [${curPh}]，批次 [${plan.fvc}] 的 Display Marking 标为 Non-Security，企图发放量产无安全码小屏！`;
+                const solution = `👉 解决建议：根据样机信息安全规范，前三阶段严禁流出无码屏，请确认排产表第 24 行是否应标为 Security。`;
+                if (!list.some(it => it.type === '试产混入量产屏' && it.batch === plan.fvc)) {
+                  list.push({ type: '试产混入量产屏', title: msg, solution, batch: plan.fvc, severity: 'danger' });
+                }
+              }
+            }
+          });
+
+          return list;
+        });
 
         return {
           bomFileName,
