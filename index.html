@@ -1053,8 +1053,19 @@
         if (bom.sim && bom.sim !== '/' && bom.sim !== '0' && bom.sim.toUpperCase() !== 'ALL') {
           const bomSim = bom.sim.toUpperCase();
           const planSim = (plan.sim || '').toUpperCase();
-          if (bomSim.includes('DS') && !planSim.includes('DS')) return false;
-          if (bomSim.includes('SS') && !planSim.includes('SS')) return false;
+
+          // 物理卡托规则：P+E (实体卡+eSIM) 物理上发单卡托(SS)；P+P 发双卡托(DS)
+          let isPlanSingle = false;
+          let isPlanDual = false;
+
+          if (planSim.includes('P+E') || planSim.includes('SS') || planSim.includes('SINGLE')) {
+            isPlanSingle = true;
+          } else if (planSim.includes('P+P') || planSim.includes('DS') || planSim.includes('DUAL')) {
+            isPlanDual = true;
+          }
+
+          if (bomSim.includes('SS') && !isPlanSingle) return false;
+          if (bomSim.includes('DS') && !isPlanDual) return false;
         }
 
         // 动态查 BOM 规则 2：智能区分 SKU 列是“市场区域”还是“内存存储规格”
